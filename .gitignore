@@ -1,0 +1,13 @@
+# Visual Studio junk
+.vs/
+x64/
+Debug/
+Release/
+*.vcxproj.user
+
+# Build output
+*.exe
+*.dll
+*.obj
+*.pdb
+*.ilk
