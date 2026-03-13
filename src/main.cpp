@@ -1,22 +1,12 @@
-#include <SDL3/SDL_init.h>
-#include <SDL3/SDL_error.h>
-#include <SDL3/SDL_keycode.h>
-#include <SDL3/SDL_mouse.h>
-#include <SDL3/SDL_pixels.h>
-#include <SDL3/SDL_rect.h>
-#include <SDL3/SDL_render.h>
-#include <SDL3/SDL_surface.h>
-#include <SDL3/SDL_video.h>
-#include <SDL3/SDL_events.h>
-#include <SDL3/SDL_ttf.h>
-#include <SDL3/SDL_timer.h>
-#include <SDL3/SDL_blendmode.h>
+#include <SDL3/SDL.h>
+#include <SDL3_ttf/SDL_ttf.h>
 
 #include "Constants.h"
 #include "Settings.h"
 #include "Piece.h"
 #include "Board.h"
 #include "Engine.h"
+#include "MovePanel.h"
 
 #include <iostream>
 #include <string>
@@ -33,6 +23,7 @@ enum class UIState
 };
 UIState prevState = UIState::START_MENU;
 UIState currState = UIState::START_MENU;
+bool exitYesSelected = true;
 
 const SDL_Color COLOR_BG = { 25, 25, 32, 255 };
 const SDL_Color COLOR_BTN = { 55, 115, 255, 255 };
@@ -72,7 +63,7 @@ static bool init(SDL_Window*& window, SDL_Renderer*& renderer, TTF_Font*& font, 
         return false;
     }
 
-    window = SDL_CreateWindow("Chess", 1500, 900, SDL_WINDOW_RESIZABLE);
+    window = SDL_CreateWindow("Chess", 0, 0, SDL_WINDOW_FULLSCREEN);
     if (!window)
     {
         std::cerr << "Window Creation Failed! SDL_Error: " << SDL_GetError() << std::endl;
@@ -106,6 +97,80 @@ static bool init(SDL_Window*& window, SDL_Renderer*& renderer, TTF_Font*& font, 
     }
 
     return true;
+}
+
+static void drawNumbers(SDL_Renderer* renderer, TTF_Font* font)
+{
+    // Set the color for the numbers (white)
+    SDL_Color textColor = { 255, 255, 255, 255 };
+
+    for (int i = 0; i < BOARD_SIZE; i++)
+    {
+        std::string text = std::to_string(8 - i);
+
+        // Create a surface with the number as text
+        SDL_Surface* textSurface = TTF_RenderText_Blended(font, text.c_str(), text.length(), textColor);
+        if (!textSurface)
+        {
+            std::cerr << "Text rendering failed! SDL_ttf Error: " << SDL_GetError() << std::endl;
+            return;
+        }
+
+        SDL_Texture* textTexture = SDL_CreateTextureFromSurface(renderer, textSurface);
+        SDL_DestroySurface(textSurface);
+
+        if (!textTexture)
+        {
+            std::cerr << "Texture creation failed! SDL_Error: " << SDL_GetError() << std::endl;
+            return;
+        }
+
+        // Define the destination rectangle (positioning it on the left border, vertically)
+        SDL_Rect textRect = { BOARD_OFFSET_X + BORDER_WIDTH / 2 - 8, SQUARE_SIZE / 2 + BOARD_OFFSET_Y + BORDER_WIDTH + i * SQUARE_SIZE - 8, 12, 20 }; // Adjust size
+        SDL_FRect fTextRect;
+        SDL_RectToFRect(&textRect, &fTextRect);
+
+        SDL_RenderTexture(renderer, textTexture, nullptr, &fTextRect);
+        SDL_DestroyTexture(textTexture);
+    }
+}
+
+static void drawLetters(SDL_Renderer* renderer, TTF_Font* font)
+{
+    SDL_Color textColor = { 255, 255, 255, 255 }; // White color for text
+
+    // Loop through letters 'A' to 'H'
+    for (int i = 0; i < BOARD_SIZE; i++)
+    {
+        char letter = 'a' + i;            // Generate the letter (a, b, c, ..., h)
+        std::string letterStr(1, letter); // Convert the letter to a string
+
+        // Render the letter with smoother anti-aliasing
+        SDL_Surface* textSurface = TTF_RenderText_Blended(font, letterStr.c_str(), letterStr.length(), textColor);
+
+        if (!textSurface)
+        {
+            std::cerr << "Text rendering failed! SDL_ttf Error: " << SDL_GetError() << std::endl;
+            return;
+        }
+
+        SDL_Texture* textTexture = SDL_CreateTextureFromSurface(renderer, textSurface);
+        SDL_DestroySurface(textSurface);
+
+        if (!textTexture)
+        {
+            std::cerr << "Texture creation failed! SDL_Error: " << SDL_GetError() << std::endl;
+            return;
+        }
+
+        // Define the destination rectangle (positioning it on the left border, vertically)
+        SDL_Rect textRect = { BORDER_WIDTH_X + i * SQUARE_SIZE + (SQUARE_SIZE / 2) - 5, BORDER_WIDTH_Y + BOARD_SIZE * SQUARE_SIZE + 8, 10, 22 };
+        SDL_FRect fTextRect;
+        SDL_RectToFRect(&textRect, &fTextRect);
+
+        SDL_RenderTexture(renderer, textTexture, nullptr, &fTextRect);
+        SDL_DestroyTexture(textTexture);
+    }
 }
 
 static void DrawRounded(SDL_Renderer* r, float x, float y, float w, float h, float radius, SDL_Color c)
@@ -219,7 +284,7 @@ static void DepthButton(SDL_Renderer* r, int mx, int my,
     if (h && SDL_GetMouseState(NULL, NULL) & SDL_BUTTON_MASK(SDL_BUTTON_LEFT))
     {
         depth += delta;
-        depth = max(1, min(depth, 12));
+        depth = max(1000, min(depth, 2500));
         SDL_Delay(180); // debounce
     }
 }
@@ -227,7 +292,7 @@ static void DepthButton(SDL_Renderer* r, int mx, int my,
 static void DrawOverlay(SDL_Renderer* r)
 {
     SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
-    SDL_SetRenderDrawColor(r, 0, 0, 0, 160);
+    SDL_SetRenderDrawColor(r, 0, 0, 0, 60);
     SDL_FRect full = { 0, 0, SCREEN_WIDTH, SCREEN_HEIGHT };
     SDL_RenderFillRect(r, &full);
 }
@@ -244,17 +309,27 @@ static GameSettings ShowStartScreen(SDL_Renderer* r, TTF_Font* font, Board& boar
     GameSettings gs;
     SDL_Event e;
 
-    int depth = 6;
+    int depth = 1200;
     bool pickingDepth = false;
 
     const float PW = 420, PH = 360;
-    const float PX = SCREEN_WIDTH - PW + 500;
+
+    // start of right gray area (same as MovePanel)
+    float rightPanelX = 2 * BORDER_WIDTH_X + BOARD_SIZE * SQUARE_SIZE;
+
+    // width of that gray area
+    float rightPanelWidth = PANEL_WIDTH;
+
+    // center inside the gray panel
+    const float PX = rightPanelX + (rightPanelWidth - PW) / 2;
     const float PY = (SCREEN_HEIGHT - PH) / 2;
 
     int mx = 0, my = 0;
-
     while (true)
     {
+        SDL_SetRenderDrawColor(r, 0, 0, 0, 255);
+        SDL_RenderClear(r);
+
         while (SDL_PollEvent(&e))
         {
             if (e.type == SDL_EVENT_QUIT)
@@ -289,9 +364,34 @@ static GameSettings ShowStartScreen(SDL_Renderer* r, TTF_Font* font, Board& boar
                     if (Hover(mx, my, PX + 145, PY + 240, 130, 40))
                     {
                         gs.vsEngine = true;
-                        gs.engineDepth = depth;
+                        gs.engineDepth = static_cast<int>(1.05 * depth + 300);
                         return gs;
                     }
+                }
+            }
+
+            if (e.type == SDL_EVENT_KEY_DOWN)
+            {
+                if (pickingDepth)
+                {
+                    if (e.key.key == SDLK_LEFT)
+                    {
+                        depth -= 50;
+                        depth = max(1000, min(depth, 2500));
+                    }
+                    else if (e.key.key == SDLK_RIGHT)
+                    {
+                        depth += 50;
+                        depth = max(1000, min(depth, 2500));
+                    }
+                    else if (e.key.key == SDLK_RETURN)
+                    {
+                        gs.vsEngine = true;
+                        gs.engineDepth = static_cast<int>(1.05 * depth + 300);
+                        return gs;
+                    }
+                    else if (e.key.key == SDLK_ESCAPE)
+                        pickingDepth = false;
                 }
             }
         }
@@ -299,8 +399,24 @@ static GameSettings ShowStartScreen(SDL_Renderer* r, TTF_Font* font, Board& boar
         // Draw board first (for transparent background)
         board.drawBoard(r, font);
 
+        SDL_SetRenderDrawColor(r, 28, 28, 28, 255);
+
+        SDL_FRect panelBG = {
+            2 * BORDER_WIDTH_X + BOARD_SIZE * SQUARE_SIZE,
+            0,
+            1920 - (2 * BORDER_WIDTH_X + BOARD_SIZE * SQUARE_SIZE) - BOARD_OFFSET_X,
+            1080
+        };
+
+        SDL_RenderFillRect(r, &panelBG);
+
+        drawNumbers(r, font);
+        drawLetters(r, font);
+
         // Overlay
         DrawOverlay(r);
+
+        SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
 
         // Panel with shadow
         DrawShadow(r, PX, PY, PW, PH);
@@ -318,14 +434,14 @@ static GameSettings ShowStartScreen(SDL_Renderer* r, TTF_Font* font, Board& boar
             DrawTextCentered(r, font, "Choose Depth", PX, PY + 90, PW, 40, COLOR_TEXT);
 
             // Minus
-            DepthButton(r, mx, my, PX + 90, PY + 150, "-", depth, -1, font);
+            DepthButton(r, mx, my, PX + 90, PY + 150, "-", depth, -50, font);
 
             // Depth value
             DrawTextCentered(r, font, std::to_string(depth),
                 PX + 170, PY + 145, 80, 60, COLOR_TEXT);
 
             // Plus
-            DepthButton(r, mx, my, PX + 270, PY + 150, "+", depth, +1, font);
+            DepthButton(r, mx, my, PX + 270, PY + 150, "+", depth, +50, font);
 
             // OK button
             FancyButton(r, mx, my, PX + 145, PY + 240, 130, 40, "OK", font);
@@ -357,84 +473,16 @@ static SDL_Texture* loadTexture(SDL_Renderer* renderer, const std::string& path)
     return texture;
 }
 
-static void drawNumbers(SDL_Renderer* renderer, TTF_Font* font)
-{
-    // Set the color for the numbers (white)
-    SDL_Color textColor = { 255, 255, 255, 255 };
-
-    for (int i = 0; i < BOARD_SIZE; i++)
-    {
-        std::string text = std::to_string(8 - i);
-
-        // Create a surface with the number as text
-        SDL_Surface* textSurface = TTF_RenderText_Blended(font, text.c_str(), text.length(), textColor);
-        if (!textSurface)
-        {
-            std::cerr << "Text rendering failed! SDL_ttf Error: " << SDL_GetError() << std::endl;
-            return;
-        }
-
-        SDL_Texture* textTexture = SDL_CreateTextureFromSurface(renderer, textSurface);
-        SDL_DestroySurface(textSurface);
-
-        if (!textTexture)
-        {
-            std::cerr << "Texture creation failed! SDL_Error: " << SDL_GetError() << std::endl;
-            return;
-        }
-
-        // Define the destination rectangle (positioning it on the left border, vertically)
-        SDL_Rect textRect = { BORDER_WIDTH / 2 - 3, SQUARE_SIZE / 2 + BORDER_WIDTH + i * SQUARE_SIZE - 8, 12, 20 }; // Adjust size
-        SDL_FRect fTextRect;
-        SDL_RectToFRect(&textRect, &fTextRect);
-
-        SDL_RenderTexture(renderer, textTexture, nullptr, &fTextRect);
-        SDL_DestroyTexture(textTexture);
-    }
-}
-
-static void drawLetters(SDL_Renderer* renderer, TTF_Font* font)
-{
-    SDL_Color textColor = { 255, 255, 255, 255 }; // White color for text
-
-    // Loop through letters 'A' to 'H'
-    for (int i = 0; i < BOARD_SIZE; i++)
-    {
-        char letter = 'a' + i;            // Generate the letter (a, b, c, ..., h)
-        std::string letterStr(1, letter); // Convert the letter to a string
-
-        // Render the letter with smoother anti-aliasing
-        SDL_Surface* textSurface = TTF_RenderText_Blended(font, letterStr.c_str(), letterStr.length(), textColor);
-
-        if (!textSurface)
-        {
-            std::cerr << "Text rendering failed! SDL_ttf Error: " << SDL_GetError() << std::endl;
-            return;
-        }
-
-        SDL_Texture* textTexture = SDL_CreateTextureFromSurface(renderer, textSurface);
-        SDL_DestroySurface(textSurface);
-
-        if (!textTexture)
-        {
-            std::cerr << "Texture creation failed! SDL_Error: " << SDL_GetError() << std::endl;
-            return;
-        }
-
-        // Define the destination rectangle (positioning it on the left border, vertically)
-        SDL_Rect textRect = { BORDER_WIDTH + i * SQUARE_SIZE + (SQUARE_SIZE / 2) - 5, BORDER_WIDTH + BOARD_SIZE * SQUARE_SIZE + 10, 10, 22 };
-        SDL_FRect fTextRect;
-        SDL_RectToFRect(&textRect, &fTextRect);
-
-        SDL_RenderTexture(renderer, textTexture, nullptr, &fTextRect);
-        SDL_DestroyTexture(textTexture);
-    }
-}
-
 // Function to render the piece
-static void render(SDL_Renderer* renderer, TTF_Font* font, Board& board)
+static void render(SDL_Renderer* renderer, TTF_Font* font, Board& board, MovePanel& panel, MoveHistory& moveHistory)
 {
     board.drawBoard(renderer, font);
+    panel.draw(renderer, font, moveHistory);
+
+    if (board.gameOver) {
+        board.drawGameOverScreen(renderer, font);
+        return;
+    }
 
     for (Piece* piece : board.getPieces())
     {
@@ -461,16 +509,23 @@ static void DrawExitConfirm(SDL_Renderer* r, TTF_Font* font, float mx, float my)
     float x = (SCREEN_WIDTH - w) / 2;
     float y = (SCREEN_HEIGHT - h) / 2;
 
-    DrawRounded(r, x, y, w, h, 12, { 40,40,40,240 });
+    DrawRounded(r, x, y, w, h, 20, { 40,40,40,240 });
 
     DrawTextCentered(r, font, "Quit Game?", x, y + 20, w, 40, { 255,255,255,255 });
 
-    // YES
-    DrawRounded(r, x + 40, y + 100, 120, 40, 10, { 200,70,70,255 });
+    // Button colors based on selection
+    SDL_Color yesColor = exitYesSelected ?
+        SDL_Color{ 240,90,90,255 } : SDL_Color{ 200,70,70,255 };
+
+    SDL_Color noColor = !exitYesSelected ?
+        SDL_Color{ 100,170,255,255 } : SDL_Color{ 70,140,255,255 };
+
+    // YES button
+    DrawRounded(r, x + 40, y + 100, 120, 40, 12, yesColor);
     DrawTextCentered(r, font, "YES", x + 40, y + 100, 120, 40, { 255,255,255,255 });
 
-    // NO
-    DrawRounded(r, x + 200, y + 100, 120, 40, 10, { 70,140,255,255 });
+    // NO button
+    DrawRounded(r, x + 200, y + 100, 120, 40, 12, noColor);
     DrawTextCentered(r, font, "NO", x + 200, y + 100, 120, 40, { 255,255,255,255 });
 }
 
@@ -483,7 +538,6 @@ static void close(SDL_Window* window, SDL_Renderer* renderer, TTF_Font* font)
     if (font)
         TTF_CloseFont(font);
 
-    if (SETTINGS.vsEngine) Engine::stop();
     TTF_Quit();
     SDL_Quit();
 }
@@ -500,6 +554,14 @@ int main()
 
     Board board;
     board.loadTextures(renderer);
+
+    MoveHistory moveHistory;
+    MovePanel panel(
+        2 * BORDER_WIDTH_X + BOARD_SIZE * SQUARE_SIZE,
+        0,
+        PANEL_WIDTH,
+        1080
+    );
 
     bool quit = false, playerMoved = false, startMenuDone = false;
     Piece* selectedPiece = nullptr;
@@ -520,8 +582,13 @@ int main()
             switch (event.type)
             {
             case SDL_EVENT_QUIT:
+            {
+                if (SETTINGS.vsEngine)
+                    Engine::stop();
+
                 quit = true;
-                break;
+            }
+            break;
 
             case SDL_EVENT_KEY_DOWN:
             {
@@ -535,6 +602,43 @@ int main()
                         currState = UIState::EXIT_CONFIRM;
                     }
                 }
+
+                else if (currState == UIState::EXIT_CONFIRM)
+                {
+                    if (event.key.key == SDLK_LEFT)
+                        exitYesSelected = true;
+                    else if (event.key.key == SDLK_RIGHT)
+                        exitYesSelected = false;
+
+                    else if (event.key.key == SDLK_RETURN)
+                    {
+                        if (exitYesSelected)
+                            quit = true;
+                        else currState = prevState;
+                    }
+                }
+                else if (event.key.key == SDLK_LEFT)
+                {
+                    if (!board.promotionActive)
+                        board.stepBackward(moveHistory);
+                }
+                else if (event.key.key == SDLK_RIGHT)
+                {
+                    if (!board.promotionActive)
+                        board.stepForward(moveHistory);
+                }
+            }
+            break;
+
+            case SDL_EVENT_MOUSE_WHEEL:
+            {
+                panel.scrollY -= event.wheel.y * 25;
+
+                if (panel.scrollY < 0)
+                    panel.scrollY = 0;
+
+                if (panel.scrollY > panel.maxScroll)
+                    panel.scrollY = panel.maxScroll;
             }
             break;
 
@@ -562,23 +666,33 @@ int main()
                     continue;
                 }
 
+                if (board.currentMoveIndex != moveHistory.getMoves().size())
+                    break;
 
                 if (event.button.button == SDL_BUTTON_LEFT && board.promotionActive)
                 {
-                    board.handlePromotionClick(mouseX, mouseY);
+                    board.handlePromotionClick(mouseX, mouseY, moveHistory);
                     selectedPiece = nullptr;
+
+					playerMoved = true;
                     break;
                 }
 
-                if (event.button.button == SDL_BUTTON_LEFT)
+                if (event.button.button == SDL_BUTTON_LEFT) {
+                    if (board.currentMoveIndex != moveHistory.getMoves().size())
+                        board.replayTo(moveHistory, moveHistory.getMoves().size());
                     selectedPiece = board.selectPiece(mouseX, mouseY);
+                }
                 else if (event.button.button == SDL_BUTTON_RIGHT)
                 {
+                    if (board.currentMoveIndex != moveHistory.getMoves().size())
+                        board.replayTo(moveHistory, moveHistory.getMoves().size());
+
                     if (!selectedPiece)
                         selectedPiece = board.selectPiece(mouseX, mouseY);
                     else
                     {
-                        board.movePiece(renderer, selectedPiece, mouseX, mouseY);
+                        board.movePiece(renderer, selectedPiece, mouseX, mouseY, moveHistory);
                         selectedPiece = nullptr;
                         playerMoved = true;
                     }
@@ -593,7 +707,7 @@ int main()
 
                 if (event.button.button == SDL_BUTTON_LEFT && selectedPiece)
                 {
-                    board.movePiece(renderer, selectedPiece, mouseX, mouseY);
+                    board.movePiece(renderer, selectedPiece, mouseX, mouseY, moveHistory);
                     selectedPiece = nullptr;
                     playerMoved = true;
                 }
@@ -602,7 +716,7 @@ int main()
             }
         }
 
-        SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
+        SDL_SetRenderDrawColor(renderer, 48, 48, 48, 255);
         SDL_RenderClear(renderer);
 
         if (currState == UIState::START_MENU)
@@ -624,7 +738,7 @@ int main()
             currState = UIState::PLAYING;
         }
         else
-            render(renderer, font, board);
+            render(renderer, font, board, panel, moveHistory);
 
         if (currState == UIState::EXIT_CONFIRM)
             DrawExitConfirm(renderer, font, mx, my);
@@ -632,10 +746,12 @@ int main()
         SDL_RenderPresent(renderer);
 
         // === STOCKFISH PLAYS BLACK ===
-        if (SETTINGS.vsEngine && playerMoved && !board.isWhiteTurn && !board.gameOver && currState == UIState::PLAYING)
+        if (SETTINGS.vsEngine && playerMoved && !board.isWhiteTurn &&
+            !board.gameOver && currState == UIState::PLAYING &&
+            !board.viewingHistory)
         {
             Engine::send(board.uciHistory);
-            Engine::send("go depth 20");
+            Engine::send("go depth 18");
 
             std::string bm = Engine::waitBestmove(), move;
 
@@ -650,6 +766,10 @@ int main()
             auto to = board.uciToCoord(move.substr(2, 2));
             int toRow = to.first, toCol = to.second;
 
+            char promo = 0;
+            if (move.length() == 5)
+                promo = move[4];  // 'q','r','b','n'
+
             Piece* p = board.board[fromRow][fromCol];
 
             if (!p)
@@ -658,9 +778,18 @@ int main()
                 continue;
             }
 
+            // Validate before applying
+            if (!Move::isValidMove(p, to.first, to.second,
+                from.first, from.second,
+                board.board))
+            {
+                std::cerr << "Illegal engine move detected.\n";
+                continue;
+            }
+
             board.movePiece(renderer, p,
-                BORDER_WIDTH + toCol * SQUARE_SIZE,
-                BORDER_WIDTH + toRow * SQUARE_SIZE);
+                BORDER_WIDTH_X + toCol * SQUARE_SIZE,
+                BORDER_WIDTH_Y + toRow * SQUARE_SIZE, moveHistory, promo);
         }
     }
 

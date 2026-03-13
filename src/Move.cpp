@@ -65,9 +65,17 @@ bool Move::isValidMove(Piece* piece, int newRow, int newCol, int oldRow, int old
             {
                 if (!board[newRow][newCol])
                 {
-                    lastMoveType = MoveType::Normal;
+                    bool isPromotionRank =
+                        (piece->isWhite && newRow == 0) ||
+                        (!piece->isWhite && newRow == 7);
+
+                    lastMoveType = isPromotionRank
+                        ? MoveType::Promotion
+                        : MoveType::Normal;
+
                     if (leavesKingInCheck(piece, newRow, newCol, oldRow, oldCol, board))
                         return false;
+
                     return true;
                 }
             }
@@ -91,9 +99,17 @@ bool Move::isValidMove(Piece* piece, int newRow, int newCol, int oldRow, int old
             // Regular capture
             if (board[newRow][newCol] && board[newRow][newCol]->isWhite != piece->isWhite)
             {
-                lastMoveType = MoveType::Capture;
+                bool isPromotionRank =
+                    (piece->isWhite && newRow == 0) ||
+                    (!piece->isWhite && newRow == 7);
+
+                lastMoveType = isPromotionRank
+                    ? MoveType::Promotion
+                    : MoveType::Capture;
+
                 if (leavesKingInCheck(piece, newRow, newCol, oldRow, oldCol, board))
                     return false;
+
                 return true;
             }
 
@@ -384,27 +400,30 @@ bool Move::canCastle(Piece* king, int newRow, int newCol, Piece* board[BOARD_SIZ
             return false;
     }
 
-    // Ensure king doesnt move through check
-    int step = (newCol == 6) ? 1 : -1;
-    int col = 4;
+    // 1️⃣ King cannot be in check initially
+    if (Board::isKingInCheck(king->isWhite, board))
+        return false;
 
-    while (col != newCol)
+    // 2️⃣ Determine direction
+    int direction = (newCol == 6) ? 1 : -1;
+
+    // 3️⃣ Check exactly two squares
+    for (int step = 1; step <= 2; ++step)
     {
-        int testCol = col + step;
+        int testCol = 4 + step * direction;
 
-        board[row][col] = nullptr;
+        Piece* original = board[row][testCol];
+
+        board[row][4] = nullptr;
         board[row][testCol] = king;
 
-        if (Board::isKingInCheck(king->isWhite, board))
-        {
-            board[row][testCol] = nullptr;
-            board[row][col] = king;
-            return false;
-        }
+        bool inCheck = Board::isKingInCheck(king->isWhite, board);
 
-        board[row][testCol] = nullptr;
-        board[row][col] = king;
-        col = testCol;
+        board[row][testCol] = original;
+        board[row][4] = king;
+
+        if (inCheck)
+            return false;
     }
 
     return true;

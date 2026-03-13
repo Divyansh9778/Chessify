@@ -14,7 +14,8 @@ enum class MoveType
     EnPassant,
     CastleKing,
     CastleQueen,
-    Promotion
+    Promotion,
+    ForcedPromotion
 };
 
 class Move

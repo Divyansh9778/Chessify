@@ -1,7 +1,0 @@
-<Solution>
-  <Configurations>
-    <Platform Name="x64" />
-    <Platform Name="x86" />
-  </Configurations>
-  <Project Path="Chessify.vcxproj" Id="44cdb857-ff0b-41b4-b185-a5cecb1a125f" />
-</Solution>

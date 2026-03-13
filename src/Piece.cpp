@@ -26,8 +26,8 @@ void Piece::drawPiece(SDL_Renderer* renderer, const std::unordered_map<std::stri
     SDL_Texture* texture = it->second;
 
     SDL_FRect fPieceRect = {
-        BORDER_WIDTH + xPos, // Center X
-        BORDER_WIDTH + yPos, // Center Y
+        BORDER_WIDTH_X + xPos, // Center X
+        BORDER_WIDTH_Y + yPos, // Center Y
         SQUARE_SIZE,         // Width of piece
         SQUARE_SIZE          // Height of piece
     };

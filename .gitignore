@@ -1,13 +1,41 @@
-# Visual Studio junk
+# =============================
+# Visual Studio
+# =============================
 .vs/
-x64/
-Debug/
-Release/
 *.vcxproj.user
+*.VC.db
 
-# Build output
+# =============================
+# CMake build folders
+# =============================
+out/
+build/
+cmake-build-*/
+CMakeFiles/
+CMakeCache.txt
+*.cmake
+compile_commands.json
+
+# =============================
+# Compiled binaries
+# =============================
 *.exe
 *.dll
+*.so
+*.dylib
 *.obj
 *.pdb
 *.ilk
+*.lib
+
+# =============================
+# Ninja / MSVC
+# =============================
+.ninja_log
+.ninja_deps
+
+# =============================
+# OS junk
+# =============================
+.DS_Store
+Thumbs.db

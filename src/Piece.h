@@ -1,7 +1,7 @@
 #ifndef PIECE_H
 #define PIECE_H
 
-#include <SDL3/SDL_render.h>
+#include <SDL3/SDL.h>
 
 #include <string>
 #include <unordered_map>
