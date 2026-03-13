@@ -2,17 +2,29 @@
 #include "Settings.h"
 #include "Piece.h"
 #include "Move.h"
+#include "MoveHistory.h"
 #include "MoveRecord.h"
 #include "Board.h"
 
-#include <SDL3/SDL.h>
+#include <SDL3/SDL_blendmode.h>
+#include <SDL3/SDL_rect.h>
+#include <SDL3/SDL_error.h>
+#include <SDL3/SDL_pixels.h>
+#include <SDL3/SDL_render.h>
+#include <SDL3/SDL_timer.h>
+#include <SDL3/SDL_surface.h>
+#include <SDL3/SDL_stdinc.h>
 #include <SDL3_ttf/SDL_ttf.h>
 
+#include <vector>
 #include <iostream>
 #include <unordered_map>
 #include <cmath>
 #include <algorithm>
 #include <string>
+#include <string.h>
+#include <utility>
+#include <cctype>
 
 Piece* Board::lastMovedPiece = nullptr;
 int lastFromRow = -1;
@@ -50,18 +62,17 @@ Board::Board()
 
         if (row < 0 || row >= BOARD_SIZE || col < 0 || col >= BOARD_SIZE)
             continue;
+
         board[row][col] = piece;
     }
 }
 
 Board::~Board()
 {
-    // Free all loaded textures
     for (auto& pair : pieceTextures)
         SDL_DestroyTexture(pair.second);
     pieceTextures.clear();
 
-    // Free dynamically allocated pieces
     for (Piece* piece : pieces)
         delete piece;
     pieces.clear();
@@ -69,7 +80,7 @@ Board::~Board()
 
 int Board::pieceValue(const std::string& type)
 {
-    char p = type[1]; // second character: p,r,n,b,q,k
+    char p = type[1];
     switch (p)
     {
     case 'p': return 1;
@@ -85,11 +96,11 @@ void Board::loadTextures(SDL_Renderer* renderer)
 {
     std::vector<std::string> pieceNames = {
         "wp", "wr", "wn", "wb", "wq", "wk",
-        "bp", "br", "bn", "bb", "bq", "bk" };
+        "bp", "br", "bn", "bb", "bq", "bk"};
 
     for (const std::string& name : pieceNames)
     {
-        std::string path = "assets/pieces/" + name + ".bmp"; // Adjust path as needed
+        std::string path = "assets/pieces/" + name + ".bmp";
         SDL_Surface* surface = SDL_LoadBMP(path.c_str());
         if (!surface)
         {
@@ -98,7 +109,7 @@ void Board::loadTextures(SDL_Renderer* renderer)
         }
 
         SDL_Texture* texture = SDL_CreateTextureFromSurface(renderer, surface);
-        SDL_DestroySurface(surface); // Free surface after creating texture
+        SDL_DestroySurface(surface);
 
         if (!texture)
         {
@@ -161,10 +172,7 @@ void Board::replayTo(MoveHistory& history, int index)
         const MoveRecord& m = history.getMoves()[i];
 
         Piece* p = board[m.fromRow][m.fromCol];
-        if (!p) {
-            std::cout << "hello" << std::endl;
-            continue;
-        }
+        if (!p) continue;
 
         // simulate without adding to history
         simulateMoveFromRecord(p, m);
@@ -219,17 +227,26 @@ void Board::replayTo(MoveHistory& history, int index)
 void Board::simulateMoveFromRecord(Piece* piece, const MoveRecord& m)
 {
     Piece* target = board[m.toRow][m.toCol];
-
-    // ---- Handle capture on destination square ----
     if (target)
     {
-        auto it = std::find(pieces.begin(), pieces.end(), target);
-        if (it != pieces.end())
+        std::string type = target->type;
+
+        if (target->isWhite)
         {
-            pieces.erase(it);
-            delete target;
+            whiteCaptured[type]++;
+            blackMaterial += pieceValue(type);
+        }
+        else
+        {
+            blackCaptured[type]++;
+            whiteMaterial += pieceValue(type);
         }
 
+        auto it = std::find(pieces.begin(), pieces.end(), target);
+        if (it != pieces.end())
+            pieces.erase(it);
+
+        delete target;
         board[m.toRow][m.toCol] = nullptr;
     }
 
@@ -255,6 +272,19 @@ void Board::simulateMoveFromRecord(Piece* piece, const MoveRecord& m)
 
         if (pawn)
         {
+            std::string type = pawn->type;
+
+            if (pawn->isWhite)
+            {
+                whiteCaptured[type]++;
+                blackMaterial += pieceValue(type);
+            }
+            else
+            {
+                blackCaptured[type]++;
+                whiteMaterial += pieceValue(type);
+            }
+
             auto it = std::find(pieces.begin(), pieces.end(), pawn);
             if (it != pieces.end())
             {
@@ -276,7 +306,6 @@ void Board::simulateMoveFromRecord(Piece* piece, const MoveRecord& m)
     case MoveType::CastleKing:
     {
         int row = m.fromRow;
-
         Piece* rook = board[row][7];
 
         board[row][7] = nullptr;
@@ -294,7 +323,6 @@ void Board::simulateMoveFromRecord(Piece* piece, const MoveRecord& m)
     case MoveType::CastleQueen:
     {
         int row = m.fromRow;
-
         Piece* rook = board[row][0];
 
         board[row][0] = nullptr;
@@ -311,14 +339,15 @@ void Board::simulateMoveFromRecord(Piece* piece, const MoveRecord& m)
 
     case MoveType::Promotion:
     {
+        bool isWhite = piece->isWhite;
+
         auto it = std::find(pieces.begin(), pieces.end(), piece);
         if (it != pieces.end())
             pieces.erase(it);
-
         delete piece;
 
         std::string newType =
-            std::string(1, isWhiteTurn ? 'w' : 'b') +
+            std::string(1, isWhite ? 'w' : 'b') +
             (char)tolower(m.promotionPiece);
 
         Piece* promoted = new Piece(
@@ -326,10 +355,20 @@ void Board::simulateMoveFromRecord(Piece* piece, const MoveRecord& m)
             m.toCol * SQUARE_SIZE,
             m.toRow * SQUARE_SIZE,
             isWhiteTurn,
-            this);
+            this
+        );
 
         pieces.push_back(promoted);
         board[m.toRow][m.toCol] = promoted;
+
+        int pawnValue = 1;
+        int newValue = pieceValue(newType);
+        int gain = newValue - pawnValue;
+
+        if (isWhiteTurn)
+            whiteMaterial += gain;
+        else
+            blackMaterial += gain;
     }
     break;
 
@@ -355,11 +394,17 @@ void Board::stepForward(MoveHistory& history)
 
     replayTo(history, currentMoveIndex + 1);
 }
-
+        
 void Board::drawBoard(SDL_Renderer* renderer, TTF_Font* font)
 {
     SDL_SetRenderDrawColor(renderer, 30, 30, 30, 255);          // Set background color
-    SDL_FRect borderRect = { BOARD_OFFSET_X, BOARD_OFFSET_Y, BOARD_WIDTH + 2 * BORDER_WIDTH, BOARD_WIDTH + 2 * BORDER_WIDTH }; // Full screen
+    SDL_FRect borderRect = {
+        BOARD_OFFSET_X,
+        BOARD_OFFSET_Y,
+        BOARD_WIDTH + 2 * BORDER_WIDTH,
+        BOARD_WIDTH + 2 * BORDER_WIDTH
+    };
+
     SDL_RenderFillRect(renderer, &borderRect);                  // Fill background
 
     for (int row = 0; row < BOARD_SIZE; row++)
@@ -370,7 +415,8 @@ void Board::drawBoard(SDL_Renderer* renderer, TTF_Font* font)
                 BORDER_WIDTH_X + col * SQUARE_SIZE,
                 BORDER_WIDTH_Y + row * SQUARE_SIZE,
                 SQUARE_SIZE,
-                SQUARE_SIZE };
+                SQUARE_SIZE
+            };
 
             if ((row + col) % 2 == 0)
                 SDL_SetRenderDrawColor(renderer, 251, 233, 167, 255);
@@ -457,9 +503,7 @@ Piece* Board::selectPiece(int x, int y)
         Piece* piece = board[row][col];
 
         if (piece && piece->isWhite == isWhiteTurn)
-        {
             return piece;
-        }
     }
     return nullptr;
 }
@@ -504,6 +548,7 @@ void Board::movePiece(SDL_Renderer* renderer, Piece* piece, int x, int y, MoveHi
     }
 
     if (gameOver) return;
+    int materialDelta = 0;
 
     int oldRow = piece->yPos / SQUARE_SIZE;
     int oldCol = piece->xPos / SQUARE_SIZE;
@@ -549,6 +594,8 @@ void Board::movePiece(SDL_Renderer* renderer, Piece* piece, int x, int y, MoveHi
         if (target)
         {
             std::string type = target->type;
+            materialDelta += pieceValue(target->type);
+
             if (target->isWhite)
             {
                 whiteCaptured[type]++;     // white piece lost
@@ -581,6 +628,8 @@ void Board::movePiece(SDL_Renderer* renderer, Piece* piece, int x, int y, MoveHi
         if (target)
         {
             std::string type = target->type;
+            materialDelta += pieceValue(target->type);
+
             if (target->isWhite)
             {
                 whiteCaptured[type]++;     // white piece lost
@@ -613,6 +662,8 @@ void Board::movePiece(SDL_Renderer* renderer, Piece* piece, int x, int y, MoveHi
             int lastCol = last->xPos / SQUARE_SIZE;
 
             std::string type = last->type;
+            materialDelta += pieceValue(last->type);
+
             if (last->isWhite)
             {
                 whiteCaptured[type]++;     // white piece lost
@@ -645,7 +696,6 @@ void Board::movePiece(SDL_Renderer* renderer, Piece* piece, int x, int y, MoveHi
         int row = oldRow;
         Piece* rook = board[row][7];
 
-        // Move the rook
         board[row][7] = nullptr;
         board[row][5] = rook;
         rook->setPosition(5 * SQUARE_SIZE, row * SQUARE_SIZE);
@@ -664,7 +714,6 @@ void Board::movePiece(SDL_Renderer* renderer, Piece* piece, int x, int y, MoveHi
         int row = oldRow;
         Piece* rook = board[row][0];
 
-        // Move rook first
         board[row][0] = nullptr;
         board[row][3] = rook;
         rook->setPosition(3 * SQUARE_SIZE, row * SQUARE_SIZE);
@@ -685,7 +734,6 @@ void Board::movePiece(SDL_Renderer* renderer, Piece* piece, int x, int y, MoveHi
         if (target)
         {
             std::string type = target->type;
-            std::cout << type << std::endl;
 
             if (target->isWhite)
             {
@@ -768,9 +816,9 @@ void Board::movePiece(SDL_Renderer* renderer, Piece* piece, int x, int y, MoveHi
             type,
             (type == MoveType::Promotion ? toupper(piece->type[1]) : 0),
             givesCheck,
-            givesMate
+            givesMate,
+            materialDelta
         );
-
         moveHistory.addMove(record);
     }
 
@@ -835,14 +883,13 @@ void Board::movePiece(SDL_Renderer* renderer, Piece* piece, int x, int y, MoveHi
                 if (board[r][c] && board[r][c]->type != "wk" && board[r][c]->type != "bk")
                     board[r][c] = nullptr;
 
-        pieces.erase(
-            std::remove_if(pieces.begin(), pieces.end(), [](Piece* p)
-                {
-                    if (p->type == "wk" || p->type == "bk")
-                        return false;
-                    delete p;
-                    return true; }),
-            pieces.end());
+        pieces.erase(std::remove_if(pieces.begin(), pieces.end(), [](Piece* p)
+            {
+                if (p->type == "wk" || p->type == "bk")
+                    return false;
+                delete p;
+                return true;
+            }), pieces.end());
 
         gameOverStart = SDL_GetTicks();
         return;
@@ -852,50 +899,47 @@ void Board::movePiece(SDL_Renderer* renderer, Piece* piece, int x, int y, MoveHi
 void Board::drawCaptured(SDL_Renderer* renderer, TTF_Font* font)
 {
     int iconSize = SQUARE_SIZE * 0.5f;
-    int stackOffset = iconSize * 0.3f;   // overlap amount
+    int stackOffset = iconSize * 0.3f;
     int spacingBetweenTypes = 0;
 
-    std::vector<char> order = { 'p','b','n','r','q' };
-    std::unordered_map<char, int> maxDisplay = { {'p', 8}, {'b', 2}, {'n', 2}, {'r', 2}, {'q', 1} };
+    std::vector<char> order = {'p', 'b', 'n', 'r', 'q'};
+    std::unordered_map<char, int> maxDisplay = {{'p', 8}, {'b', 2}, {'n', 2}, {'r', 2}, {'q', 1}};
 
-    auto drawSide = [&](std::unordered_map<std::string, int>& map,
-        bool whiteLost, int& outEndX)
+    auto drawSide = [&](std::unordered_map<std::string, int>& map, bool whiteLost, int& outEndX)
+    {
+        int yPos = whiteLost ? BOARD_OFFSET_Y - 60 : BORDER_WIDTH_Y + BOARD_WIDTH + 40;
+        int xPos = BORDER_WIDTH_X;
+
+        for (char p : order)
         {
-            int yPos = whiteLost ? BOARD_OFFSET_Y - 60
-                : BORDER_WIDTH_Y + BOARD_WIDTH + 40;
-            int xPos = BORDER_WIDTH_X;
+            std::string type = std::string(1, whiteLost ? 'w' : 'b') + p;
 
-            for (char p : order)
+            int count = std::min(map[type], maxDisplay[p]);
+            if (count <= 0) continue;
+
+            SDL_Texture* tex = pieceTextures[type];
+            if (!tex) continue;
+
+            // Draw stacked pieces
+            for (int i = 0; i < count; i++)
             {
-                std::string type = std::string(1, whiteLost ? 'w' : 'b') + p;
+                SDL_FRect dst = {
+                    (float)(xPos + i * stackOffset),
+                    (float)yPos,
+                    (float)iconSize,
+                    (float)iconSize
+                };
 
-                int count = std::min(map[type], maxDisplay[p]);
-                if (count <= 0) continue;
-
-                SDL_Texture* tex = pieceTextures[type];
-                if (!tex) continue;
-
-                // Draw stacked pieces
-                for (int i = 0; i < count; i++)
-                {
-                    SDL_FRect dst = {
-                        (float)(xPos + i * stackOffset),
-                        (float)yPos,
-                        (float)iconSize,
-                        (float)iconSize
-                    };
-
-                    SDL_RenderTexture(renderer, tex, nullptr, &dst);
-                }
-
-                // Move X to end of stack
-                xPos += stackOffset * (count - 1)
-                    + iconSize
-                    + spacingBetweenTypes;
-
+                SDL_RenderTexture(renderer, tex, nullptr, &dst);
             }
-            outEndX = xPos;
-        };
+
+            xPos += stackOffset * (count - 1)
+                + iconSize
+                + spacingBetweenTypes;
+
+        }
+        outEndX = xPos;
+    };
 
     int blackEndX = 0;
     int whiteEndX = 0;
@@ -924,13 +968,8 @@ void Board::drawCaptured(SDL_Renderer* renderer, TTF_Font* font)
             SDL_Texture* tex =
                 SDL_CreateTextureFromSurface(renderer, surf);
 
-            int yPos = whiteWinning
-                ? BORDER_WIDTH_Y + BOARD_WIDTH + 45
-                : BOARD_OFFSET_Y - 45;
-
-            int xPos = whiteWinning
-                ? blackEndX
-                : whiteEndX;
+            int yPos = whiteWinning ? BORDER_WIDTH_Y + BOARD_WIDTH + 45 : BOARD_OFFSET_Y - 45;
+            int xPos = whiteWinning ? blackEndX : whiteEndX;
 
             float scale = 0.8f;
 
@@ -985,7 +1024,8 @@ void Board::drawPromotionMenu(SDL_Renderer* renderer)
                 x + j * w,
                 y + i * w,
                 w,
-                w };
+                w
+            };
 
             if ((i + j) % 2 == 0)
                 SDL_SetRenderDrawColor(renderer, 150, 116, 83, 127);
@@ -1018,7 +1058,7 @@ void Board::handlePromotionClick(int mouseX, int mouseY, MoveHistory& moveHistor
 
     int c = (rx >= w);
     int r = (ry >= h);
-    int choice = r * 2 + c; // 0..3
+    int choice = r * 2 + c;
 
     char choices[4] = { 'q','r','b','n' };
     applyPromotion(choices[choice], moveHistory);
@@ -1046,12 +1086,13 @@ void Board::applyPromotion(char promoChar, MoveHistory& moveHistory)
     }
 
     // Create promoted piece
-    Piece* promoted =
+    Piece* promoted = 
         new Piece(newType,
-            col * SQUARE_SIZE,
-            row * SQUARE_SIZE,
-            isWhite,
-            this);
+        col * SQUARE_SIZE,
+        row * SQUARE_SIZE,
+        isWhite,
+        this
+    );
 
     pieces.push_back(promoted);
     board[row][col] = promoted;
@@ -1083,7 +1124,8 @@ void Board::applyPromotion(char promoChar, MoveHistory& moveHistory)
         'P',
         promoCaptured,
         MoveType::Promotion,
-        toupper(promoChar)
+        toupper(promoChar),
+        gain
     );
 
     moveHistory.addMove(record);
@@ -1118,12 +1160,10 @@ void Board::highlightCheckedKing(SDL_Renderer* renderer)
         Uint64 now = SDL_GetTicks();
         Uint64 elapsed = now - blinkStart;
 
-        if (elapsed < 1200)
-        {                                      // blink for 600ms
-            useBlink = ((now / 200) % 2 == 0); // toggle every 120 ms
-        }
+        if (elapsed < 1200)                         // blink for 600ms
+            useBlink = ((now / 200) % 2 == 0);      // toggle every 200 ms
         else
-            blinkCheck = false; // stop blinking
+            blinkCheck = false;                     // stop blinking
     }
 
     // Find king position
@@ -1239,7 +1279,8 @@ void Board::drawGameOverScreen(SDL_Renderer* renderer, TTF_Font* font)
             BORDER_WIDTH_X + col * SQUARE_SIZE,
             BORDER_WIDTH_Y + row * SQUARE_SIZE,
             SQUARE_SIZE,
-            SQUARE_SIZE };
+            SQUARE_SIZE
+        };
 
         SDL_SetRenderDrawColor(renderer, 144, 0, 0, 180); // solid red tile
         SDL_RenderFillRect(renderer, &sq);
@@ -1257,7 +1298,8 @@ void Board::drawGameOverScreen(SDL_Renderer* renderer, TTF_Font* font)
             &sq,
             angle,
             nullptr,
-            SDL_FLIP_NONE);
+            SDL_FLIP_NONE
+        );
     }
 
     drawEndText(renderer, font);
@@ -1269,9 +1311,9 @@ void Board::drawEndText(SDL_Renderer* renderer, TTF_Font* font)
 
     SDL_Color col;
     if (stalemate)
-        col = { 0, 0, 0, 204 };
+        col = {0, 0, 0, 204};
     else
-        col = { 204, 0, 0, 204 };
+        col = {204, 0, 0, 204};
 
     int w, h;
     TTF_GetStringSize(font, msg, strlen(msg), &w, &h);
@@ -1286,7 +1328,8 @@ void Board::drawEndText(SDL_Renderer* renderer, TTF_Font* font)
         (SCREEN_WIDTH - w * scale) / 2.0f,
         (SCREEN_HEIGHT - h * scale) / 2.0f,
         w * scale,
-        h * scale };
+        h * scale
+    };
 
     SDL_RenderTexture(renderer, tex, nullptr, &rect);
     SDL_DestroyTexture(tex);

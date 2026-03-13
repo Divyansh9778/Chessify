@@ -11,6 +11,8 @@ struct MoveRecord
     char movedPiece;        // 'P', 'N', 'B', 'R', 'Q', 'K'
     char capturedPiece;     // '.' if none
 
+    int materialDelta;
+
     MoveType type;          // Normal, Capture, Castle, etc.
     char promotionPiece = '.';    // 'Q', 'R', 'B', 'N' or '.' if none
     
@@ -22,7 +24,8 @@ struct MoveRecord
         MoveType t,
         char promo = 0,
         bool check = false,
-        bool mate = false)
+        bool mate = false,
+        int delta = 0)
         : fromRow(fr), fromCol(fc),
         toRow(tr), toCol(tc),
         movedPiece(moved),
@@ -30,9 +33,9 @@ struct MoveRecord
         type(t),
         promotionPiece(promo),
         givesCheck(check),
-        givesMate(mate)
-    {
-    }
+        givesMate(mate),
+        materialDelta(delta)
+    {}
 };
 
 #endif

@@ -16,8 +16,6 @@ set(SRC_FILES
     src/Settings.cpp
     src/MovePanel.cpp
     src/MoveHistory.cpp
-    src/Engine_unix.cpp
-    src/Engine_win.cpp
 )
 
 if (WIN32)

@@ -1,5 +1,9 @@
 #include "MoveHistory.h"
+#include "MoveRecord.h"
 #include "Move.h"
+
+#include <string>
+#include <cctype>
 
 std::string MoveHistory::formatMove(const MoveRecord& m) const
 {

@@ -1,4 +1,16 @@
+#include "Constants.h"
 #include "MovePanel.h"
+#include "MoveHistory.h"
+
+#include <SDL3_ttf/SDL_ttf.h>
+#include <SDL3/SDL_surface.h>
+#include <SDL3/SDL_render.h>
+#include <SDL3/SDL_rect.h>
+#include <SDL3/SDL_pixels.h>
+
+#include <algorithm>
+#include <string>
+#include <string.h>
 
 MovePanel::MovePanel(float px, float py, float w, float h) : x(px), y(py), width(w), height(h) {}
 
@@ -40,7 +52,7 @@ void MovePanel::draw(SDL_Renderer* renderer, TTF_Font* font, const MoveHistory& 
 
     const auto& moves = history.getMoves();
 
-    float totalRows = (moves.size() + 1) / 2;
+    float totalRows = (float)(moves.size() + 1) / 2;
     float totalHeight = totalRows * lineHeight;
 
     maxScroll = std::max(0.0f, totalHeight - (height - 120));

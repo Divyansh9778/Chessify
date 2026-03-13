@@ -1,8 +1,10 @@
 #ifndef MOVEHISTORY_H
 #define MOVEHISTORY_H
 
+#include <string>
 #include <vector>
 #include <iostream>
+
 #include "MoveRecord.h"
 #include "Move.h"
 
