@@ -21,6 +21,8 @@
 #include "Engine.h"
 #include "MovePanel.h"
 #include "MoveHistory.h"
+#include "game/GameController.h"
+#include "network/NetworkClient.h"
 
 #include <iostream>
 #include <string>
@@ -566,6 +568,15 @@ int main()
     board.loadTextures(renderer);
 
     MoveHistory moveHistory;
+
+    std::cout << "Reached network setup\n";
+    NetworkClient network;
+
+    GameController gameController(board, moveHistory, network);
+
+    std::cout << "Attempting to connect...\n";
+    network.connect("127.0.0.1", 9002);
+
     MovePanel panel(
         2 * BORDER_WIDTH_X + BOARD_SIZE * SQUARE_SIZE,
         0,
@@ -577,6 +588,13 @@ int main()
 
     while (!quit)
     {
+        while (network.hasPendingMessages())
+        {
+            MoveMessage move = network.getNextMove();
+
+            gameController.applyRemoteMove(move);
+        }
+
         playerMoved = false;
 
         float mx, my;
@@ -703,7 +721,7 @@ int main()
                         selectedPiece = board.selectPiece(mouseX, mouseY);
                     else
                     {
-                        board.movePiece(renderer, selectedPiece, mouseX, mouseY, moveHistory);
+                        gameController.playMove(renderer, selectedPiece, mouseX, mouseY);
                         selectedPiece = nullptr;
                         playerMoved = true;
                     }
@@ -718,7 +736,7 @@ int main()
 
                 if (event.button.button == SDL_BUTTON_LEFT && selectedPiece)
                 {
-                    board.movePiece(renderer, selectedPiece, mouseX, mouseY, moveHistory);
+                    gameController.playMove(renderer, selectedPiece, mouseX, mouseY);
                     selectedPiece = nullptr;
                     playerMoved = true;
                 }
@@ -800,9 +818,8 @@ int main()
                 continue;
             }
 
-            board.movePiece(renderer, p,
-                            BORDER_WIDTH_X + toCol * SQUARE_SIZE,
-                            BORDER_WIDTH_Y + toRow * SQUARE_SIZE, moveHistory, promo);
+            gameController.playMove(renderer, p, BORDER_WIDTH_X + toCol * SQUARE_SIZE, 
+                                                 BORDER_WIDTH_Y + toRow * SQUARE_SIZE, promo);
         }
     }
 

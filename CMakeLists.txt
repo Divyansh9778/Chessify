@@ -7,15 +7,24 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 find_package(SDL3 REQUIRED)
 find_package(SDL3_image REQUIRED)
 find_package(SDL3_ttf REQUIRED)
+find_package(Boost REQUIRED COMPONENTS system)
 
 set(SRC_FILES
     src/main.cpp
+
     src/Board.cpp
     src/Move.cpp
     src/Piece.cpp
+    
     src/Settings.cpp
+
     src/MovePanel.cpp
     src/MoveHistory.cpp
+
+    src/game/GameController.cpp
+
+    src/network/NetworkClient.cpp
+    src/network/NetworkMessages.cpp
 )
 
 if (WIN32)
@@ -24,14 +33,29 @@ else()
     list(APPEND SRC_FILES src/Engine_unix.cpp)
 endif()
 
-add_executable(Chessify ${SRC_FILES})
+add_executable(Chessify ${SRC_FILES} "src/network/PlayerColor.h")
 
-target_include_directories(Chessify PRIVATE src)
+add_executable(ChessifyServer
+    server/server.cpp
+ "src/network/PlayerColor.h")
+
+target_include_directories(Chessify PRIVATE
+    src
+)
+
+target_compile_definitions(Chessify PRIVATE
+    _WIN32_WINNT=0x0A00
+)
 
 target_link_libraries(Chessify PRIVATE
     SDL3::SDL3
     SDL3_image::SDL3_image
     SDL3_ttf::SDL3_ttf
+    Boost::headers
+)
+
+target_link_libraries(ChessifyServer PRIVATE
+    Boost::system
 )
 
 file(COPY ${CMAKE_SOURCE_DIR}/assets

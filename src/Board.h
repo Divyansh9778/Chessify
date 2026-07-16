@@ -15,6 +15,10 @@
 #include <string>
 #include <utility>
 
+#include <functional>
+
+class NetworkClient;
+
 class Board
 {
 public:
@@ -48,8 +52,10 @@ public:
     void drawBoard(SDL_Renderer *renderer, TTF_Font *font); // Renders the board
 
     Piece *selectPiece(int x, int y);                                                                                       // Select a piece based on coordinates
-    void movePiece(SDL_Renderer *renderer, Piece *piece, int x, int y, MoveHistory &moveHistory, char forcedPromotion = 0); // Move a piece to the new position
     std::vector<Piece *> &getPieces();                                                                                      // Get all pieces on the board
+    
+    void executeMove(Piece *piece, int newRow, int newCol, MoveHistory &moveHistory, char forcedPromotion = 0);
+    void movePiece(SDL_Renderer *renderer, Piece *piece, int x, int y, MoveHistory &moveHistory, char forcedPromotion = 0); // Move a piece to the new position
 
     static Piece *lastMovedPiece;                                      // Track the last moved piece (shared across all Board instances)
     static void setLastMoved(Piece *piece) { lastMovedPiece = piece; } // Update the last moved piece
@@ -90,8 +96,18 @@ public:
     void drawGameOverScreen(SDL_Renderer *renderer, TTF_Font *font);
     void drawEndText(SDL_Renderer *renderer, TTF_Font *font);
 
+    Piece* getPieceAt(int row, int col);
+
+    std::function<void(
+        int,
+        int,
+        int,
+        int,
+        char)>
+        onMovePlayed;
+
 private:
-    void initializePieces(); // Initializes pieces on the board
+    void initializePieces();     // Initializes pieces on the board
     std::vector<Piece *> pieces; // List of all pieces for easier management
 
     Piece *selectedPiece = nullptr;

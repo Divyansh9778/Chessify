@@ -530,36 +530,16 @@ std::pair<int, int> Board::uciToCoord(const std::string& uci)
     return { row, col };
 }
 
-void Board::movePiece(SDL_Renderer* renderer, Piece* piece, int x, int y, MoveHistory& moveHistory, char forcedPromotion)
+void Board::executeMove(Piece* piece, int newRow, int newCol, MoveHistory& moveHistory, char forcedPromotion)
 {
-    if (viewingHistory)
-        replayTo(moveHistory, moveHistory.size());
-
-    if (!piece)
-        return;
-    if ((isWhiteTurn && !piece->isWhite) || (!isWhiteTurn && piece->isWhite))
-        return;
-
-    // If promotion UI is active, treat click as promotion selection
-    if (promotionActive)
-    {
-        handlePromotionClick(x, y, moveHistory);
-        return;
-    }
-
-    if (gameOver) return;
-    int materialDelta = 0;
-
     int oldRow = piece->yPos / SQUARE_SIZE;
     int oldCol = piece->xPos / SQUARE_SIZE;
-    int newRow = (y - BORDER_WIDTH_Y) / SQUARE_SIZE;
-    int newCol = (x - BORDER_WIDTH_X) / SQUARE_SIZE;
 
     if (oldRow < 0 || oldRow >= BOARD_SIZE ||
-        oldCol < 0 || oldCol >= BOARD_SIZE ||
-        newRow < 0 || newRow >= BOARD_SIZE ||
-        newCol < 0 || newCol >= BOARD_SIZE)
+        oldCol < 0 || oldCol >= BOARD_SIZE)
         return;
+
+    int materialDelta = 0;
 
     if (!Move::isValidMove(piece, newRow, newCol, oldRow, oldCol, board))
     {
@@ -894,6 +874,35 @@ void Board::movePiece(SDL_Renderer* renderer, Piece* piece, int x, int y, MoveHi
         gameOverStart = SDL_GetTicks();
         return;
     }
+}
+
+void Board::movePiece(SDL_Renderer* renderer, Piece* piece, int x, int y, MoveHistory& moveHistory, char forcedPromotion)
+{
+    if (viewingHistory)
+        replayTo(moveHistory, moveHistory.size());
+
+    if (!piece)
+        return;
+    if ((isWhiteTurn && !piece->isWhite) || (!isWhiteTurn && piece->isWhite))
+        return;
+
+    // If promotion UI is active, treat click as promotion selection
+    if (promotionActive)
+    {
+        handlePromotionClick(x, y, moveHistory);
+        return;
+    }
+
+    if (gameOver) return;
+
+    int newRow = (y - BORDER_WIDTH_Y) / SQUARE_SIZE;
+    int newCol = (x - BORDER_WIDTH_X) / SQUARE_SIZE;
+
+    if (newRow < 0 || newRow >= BOARD_SIZE ||
+        newCol < 0 || newCol >= BOARD_SIZE)
+        return;
+
+	executeMove(piece, newRow, newCol, moveHistory, forcedPromotion);
 }
 
 void Board::drawCaptured(SDL_Renderer* renderer, TTF_Font* font)
@@ -1333,4 +1342,13 @@ void Board::drawEndText(SDL_Renderer* renderer, TTF_Font* font)
 
     SDL_RenderTexture(renderer, tex, nullptr, &rect);
     SDL_DestroyTexture(tex);
+}
+
+Piece* Board::getPieceAt(int row, int col)
+{
+    if (row < 0 || row >= BOARD_SIZE ||
+        col < 0 || col >= BOARD_SIZE)
+        return nullptr;
+
+    return board[row][col];
 }
