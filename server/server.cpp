@@ -1,8 +1,11 @@
 #include <boost/beast/core.hpp>
 #include <boost/beast/websocket.hpp>
 
+#include "../src/network/ProtocolUtils.h"
+
 #include <iostream>
 #include <string>
+#include <cstdlib>
 
 namespace beast = boost::beast;
 namespace websocket = beast::websocket;
@@ -14,13 +17,14 @@ int main()
     try
     {
         net::io_context io;
-
         std::cout << "[SERVER] Starting...\n";
 
-        const int PORT = 9002;
-        std::cout << "[SERVER] Creating acceptor on port " << PORT << '\n';
+        const char* portEnv = std::getenv("PORT");
 
-        tcp::acceptor acceptor(io, { tcp::v4(), PORT });
+        int PORT = portEnv ? std::stoi(portEnv) : 9002;
+        std::cout << "[SERVER] Starting on port " << PORT << '\n';
+
+        tcp::acceptor acceptor(io, tcp::endpoint(net::ip::make_address("0.0.0.0"), PORT));
         std::cout << "[SERVER] Listening on port 9002\n";
 
         std::cout << "[SERVER] Waiting for Player 1...\n";
@@ -32,7 +36,6 @@ int main()
 
         websocket::stream<tcp::socket> player1(std::move(socket1));
         player1.accept();
-
         std::cout << "[SERVER] Player 1 WebSocket ready\n\n";
 
         std::cout << "[SERVER] Waiting for Player 2...\n";
@@ -44,13 +47,15 @@ int main()
 
         websocket::stream<tcp::socket> player2(std::move(socket2));
         player2.accept();
-
         std::cout << "[SERVER] Player 2 WebSocket ready\n\n";
 
         std::cout << "[SERVER] Game Started!\n";
 
-        player1.write(net::buffer(std::string("WHITE")));
-        player2.write(net::buffer(std::string("BLACK")));
+        player1.write(net::buffer(
+            makePacket(MessageType::Start, "WHITE")));
+
+        player2.write(net::buffer(
+            makePacket(MessageType::Start, "BLACK")));
 
         std::cout << "[SERVER] Assigned colors\n";
 

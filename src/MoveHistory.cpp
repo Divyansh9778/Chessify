@@ -50,3 +50,8 @@ std::string MoveHistory::formatMove(const MoveRecord& m) const
 
     return move;
 }
+
+void MoveHistory::reset()
+{
+    moves.clear();
+}

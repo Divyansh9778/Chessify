@@ -106,12 +106,19 @@ public:
         char)>
         onMovePlayed;
 
+    void reset();
+
+    bool hasFinishedPromotionMove() const;
+    void clearPromotionFinishedFlag();
+
 private:
     void initializePieces();     // Initializes pieces on the board
     std::vector<Piece *> pieces; // List of all pieces for easier management
 
     Piece *selectedPiece = nullptr;
     SDL_Renderer *renderer;
+
+    bool promotionMoveFinished = false;
 };
 
 #endif

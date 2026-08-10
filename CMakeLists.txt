@@ -25,6 +25,8 @@ set(SRC_FILES
 
     src/network/NetworkClient.cpp
     src/network/NetworkMessages.cpp
+
+    src/network/ProtocolUtils.cpp
 )
 
 if (WIN32)
@@ -33,11 +35,11 @@ else()
     list(APPEND SRC_FILES src/Engine_unix.cpp)
 endif()
 
-add_executable(Chessify ${SRC_FILES} "src/network/PlayerColor.h")
+add_executable(Chessify ${SRC_FILES} "src/network/PlayerColor.h" "src/network/NetworkProtocol.h" "src/network/NetworkPacket.h" "src/network/ProtocolUtils.h" "src/network/ProtocolUtils.cpp")
 
 add_executable(ChessifyServer
     server/server.cpp
- "src/network/PlayerColor.h")
+ "src/network/PlayerColor.h" "src/network/NetworkProtocol.h" "src/network/NetworkPacket.h" "src/network/ProtocolUtils.h" "src/network/ProtocolUtils.cpp")
 
 target_include_directories(Chessify PRIVATE
     src

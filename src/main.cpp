@@ -23,6 +23,7 @@
 #include "MoveHistory.h"
 #include "game/GameController.h"
 #include "network/NetworkClient.h"
+#include "network/PlayerColor.h"
 
 #include <iostream>
 #include <string>
@@ -31,12 +32,18 @@
 #include <cmath>
 #include <algorithm>
 
+#include "network/ProtocolUtils.h"
+#include "network/NetworkPacket.h"
+
 enum class UIState
 {
     START_MENU,
+    CONNECTING,
     PLAYING,
-    EXIT_CONFIRM
+    EXIT_CONFIRM,
+    CONNECTION_LOST
 };
+
 UIState prevState = UIState::START_MENU;
 UIState currState = UIState::START_MENU;
 bool exitYesSelected = true;
@@ -469,6 +476,100 @@ static GameSettings ShowStartScreen(SDL_Renderer *r, TTF_Font *font, Board &boar
     }
 }
 
+static void DrawConnectingScreen(SDL_Renderer* renderer, TTF_Font* font, Board& board, const std::string& text)
+{
+    // Draw board
+    board.drawBoard(renderer, font);
+
+    // Right panel background
+    SDL_SetRenderDrawColor(renderer, 28, 28, 28, 255);
+
+    SDL_FRect panelBG =
+    {
+        2 * BORDER_WIDTH_X + BOARD_SIZE * SQUARE_SIZE,
+        0,
+        PANEL_WIDTH,
+        SCREEN_HEIGHT
+    };
+
+    SDL_RenderFillRect(renderer, &panelBG);
+
+    drawNumbers(renderer, font);
+    drawLetters(renderer, font);
+
+    // Dark overlay
+    DrawOverlay(renderer);
+
+    const float PW = 420;
+    const float PH = 220;
+
+    float rightPanelX =
+        2 * BORDER_WIDTH_X + BOARD_SIZE * SQUARE_SIZE;
+
+    float PX =
+        rightPanelX + (PANEL_WIDTH - PW) / 2;
+
+    float PY =
+        (SCREEN_HEIGHT - PH) / 2;
+
+    //DrawShadow(renderer, PX, PY, PW, PH);
+
+    //DrawRounded(
+    //    renderer,
+    //    PX,
+    //    PY,
+    //    PW,
+    //    PH,
+    //    12,
+    //    { 40,40,40,230 });
+
+    DrawTextCentered(
+        renderer,
+        font,
+        "Chessify Online",
+        PX,
+        PY + 25,
+        PW,
+        50,
+        COLOR_TEXT);
+
+    DrawTextCentered(
+        renderer,
+        font,
+        text,
+        PX,
+        PY + 100,
+        PW,
+        50,
+        COLOR_TEXT);
+
+    SDL_RenderPresent(renderer);
+
+    //int mx = 0, my = 0;
+    //while (true)
+    //{
+    //    SDL_SetRenderDrawColor(r, 0, 0, 0, 255);
+    //    SDL_RenderClear(r);
+
+    //    while (SDL_PollEvent(&e))
+    //    {
+    //        if (e.type == SDL_EVENT_QUIT)
+    //            exit(0);
+
+    //        if (e.type == SDL_EVENT_MOUSE_MOTION)
+    //            mx = (int)e.motion.x;
+    //        my = (int)e.motion.y;
+
+    //        if (e.type == SDL_EVENT_MOUSE_BUTTON_DOWN)
+    //        {
+    //            // Quit button
+    //            if (Hover(mx, my, PX + 145, PY + 300, 130, 40))
+    //                exit(0);
+    //        }
+    //    }
+    //}
+}
+
 static SDL_Texture *loadTexture(SDL_Renderer *renderer, const std::string &path)
 {
     SDL_Surface *surface = SDL_LoadBMP(path.c_str());
@@ -487,10 +588,10 @@ static SDL_Texture *loadTexture(SDL_Renderer *renderer, const std::string &path)
 }
 
 // Function to render the piece
-static void render(SDL_Renderer *renderer, TTF_Font *font, Board &board, MovePanel &panel, MoveHistory &moveHistory)
+static void render(SDL_Renderer *renderer, TTF_Font *font, Board &board, MovePanel &panel, MoveHistory &moveHistory, NetworkClient& network)
 {
     board.drawBoard(renderer, font);
-    panel.draw(renderer, font, moveHistory);
+    panel.draw(renderer, font, moveHistory, network.getPlayerColor());
 
     if (board.gameOver)
     {
@@ -508,6 +609,103 @@ static void render(SDL_Renderer *renderer, TTF_Font *font, Board &board, MovePan
 
     drawNumbers(renderer, font);
     drawLetters(renderer, font);
+}
+
+static void DrawConnectionLostScreen(SDL_Renderer* renderer,
+    TTF_Font* font,
+    Board& board,
+    float mx,
+    float my)
+{
+    // Draw board
+    board.drawBoard(renderer, font);
+
+    // Right panel background
+    SDL_SetRenderDrawColor(renderer, 28, 28, 28, 255);
+
+    SDL_FRect panelBG =
+    {
+        2 * BORDER_WIDTH_X + BOARD_SIZE * SQUARE_SIZE,
+        0,
+        PANEL_WIDTH,
+        SCREEN_HEIGHT
+    };
+
+    SDL_RenderFillRect(renderer, &panelBG);
+
+    drawNumbers(renderer, font);
+    drawLetters(renderer, font);
+
+    // Dark overlay
+    DrawOverlay(renderer);
+
+    const float PW = 420;
+    const float PH = 260;
+
+    float rightPanelX =
+        2 * BORDER_WIDTH_X + BOARD_SIZE * SQUARE_SIZE;
+
+    float PX =
+        rightPanelX + (PANEL_WIDTH - PW) / 2;
+
+    float PY =
+        (SCREEN_HEIGHT - PH) / 2;
+
+    DrawTextCentered(
+        renderer,
+        font,
+        "Connection Lost",
+        PX,
+        PY + 25,
+        PW,
+        50,
+        COLOR_TEXT);
+
+    DrawTextCentered(
+        renderer,
+        font,
+        "Your opponent disconnected.",
+        PX,
+        PY + 90,
+        PW,
+        50,
+        COLOR_TEXT);
+
+    // Back button
+    const float BW = 180;
+    const float BH = 45;
+
+    float BX = PX + (PW - BW) / 2;
+    float BY = PY + 170;
+
+    bool hover =
+        mx >= BX && mx <= BX + BW &&
+        my >= BY && my <= BY + BH;
+
+    SDL_Color btnColor =
+        hover ? SDL_Color{ 90, 150, 255, 255 }
+    : SDL_Color{ 65, 105, 225, 255 };
+
+    DrawRounded(
+        renderer,
+        BX,
+        BY,
+        BW,
+        BH,
+        8,
+        btnColor);
+
+    DrawTextCentered(
+        renderer,
+        font,
+        "Back to Menu",
+        BX,
+        BY + 5,
+        BW,
+        BH,
+        { 255,255,255,255 });
+
+    SDL_RenderPresent(renderer);
 }
 
 static void DrawExitConfirm(SDL_Renderer *r, TTF_Font *font, float mx, float my)
@@ -569,13 +767,8 @@ int main()
 
     MoveHistory moveHistory;
 
-    std::cout << "Reached network setup\n";
     NetworkClient network;
-
     GameController gameController(board, moveHistory, network);
-
-    std::cout << "Attempting to connect...\n";
-    network.connect("127.0.0.1", 9002);
 
     MovePanel panel(
         2 * BORDER_WIDTH_X + BOARD_SIZE * SQUARE_SIZE,
@@ -588,11 +781,18 @@ int main()
 
     while (!quit)
     {
-        while (network.hasPendingMessages())
-        {
-            MoveMessage move = network.getNextMove();
+        if (currState == UIState::PLAYING && network.hasDisconnected()) {
+            std::cout << "[UI] Switching to CONNECTION_LOST\n";
+            currState = UIState::CONNECTION_LOST;
+        }
 
-            gameController.applyRemoteMove(move);
+        if (currState == UIState::PLAYING && network.isConnected())
+        {
+            while (network.hasPendingMessages())
+            {
+                MoveMessage move = network.getNextMove();
+                gameController.applyRemoteMove(move);
+            }
         }
 
         playerMoved = false;
@@ -605,6 +805,11 @@ int main()
         {
             if (currState == UIState::START_MENU)
                 continue;
+            else if (currState == UIState::CONNECTION_LOST)
+            {
+                DrawConnectionLostScreen(renderer, font, board, mx, my);
+                continue;
+            }
 
             switch (event.type)
             {
@@ -675,6 +880,43 @@ int main()
                 int mouseX = static_cast<int>(event.button.x);
                 int mouseY = static_cast<int>(event.button.y);
 
+                if (currState == UIState::CONNECTION_LOST)
+                {
+                    const float PW = 420;
+                    const float PH = 260;
+
+                    float rightPanelX =
+                        2 * BORDER_WIDTH_X + BOARD_SIZE * SQUARE_SIZE;
+
+                    float PX =
+                        rightPanelX + (PANEL_WIDTH - PW) / 2;
+
+                    float PY =
+                        (SCREEN_HEIGHT - PH) / 2;
+
+                    const float BW = 180;
+                    const float BH = 45;
+
+                    float BX = PX + (PW - BW) / 2;
+                    float BY = PY + 170;
+
+                    if (mouseX >= BX && mouseX <= BX + BW &&
+                        mouseY >= BY && mouseY <= BY + BH)
+                    {
+                        network.clearDisconnectFlag();
+
+                        board.reset();
+                        moveHistory.reset();
+
+                        selectedPiece = nullptr;
+                        playerMoved = false;
+
+                        currState = UIState::START_MENU;
+                    }
+
+                    continue;
+                }
+
                 if (currState == UIState::EXIT_CONFIRM)
                 {
                     float w = 360, h = 180;
@@ -701,6 +943,19 @@ int main()
                 {
                     board.handlePromotionClick(mouseX, mouseY, moveHistory);
                     selectedPiece = nullptr;
+
+                    if (board.hasFinishedPromotionMove())
+                    {
+                        if (network.isConnected())
+                        {
+                            const MoveRecord& lastMove =
+                                moveHistory.getMoves().back();
+
+                            network.sendMove(lastMove);
+                        }
+
+                        board.clearPromotionFinishedFlag();
+                    }
 
                     playerMoved = true;
                     break;
@@ -752,7 +1007,43 @@ int main()
         {
             SETTINGS = ShowStartScreen(renderer, font, board);
 
-            if (SETTINGS.vsEngine)
+            if (!SETTINGS.vsEngine)
+            {
+                std::cout << "Attempting to connect...\n";
+
+                currState = UIState::CONNECTING;
+                DrawConnectingScreen(renderer, font, board, "Waiting for the opponent...");
+
+                if (!network.connect("127.0.0.1", 9002))
+                {
+                    DrawConnectingScreen(renderer, font, board, "Server not found!");
+                    SDL_Delay(2000);
+
+                    currState = UIState::START_MENU;
+                    continue;
+                }
+
+                while (!network.isReady())
+                {
+                    DrawConnectingScreen(renderer, font, board, "Waiting for the opponent...");
+
+                    SDL_PumpEvents();
+                    SDL_Delay(16);
+                }
+
+                // Wait until the user releases all mouse buttons
+                while (SDL_GetMouseState(nullptr, nullptr) & (SDL_BUTTON_MASK(SDL_BUTTON_LEFT) | SDL_BUTTON_MASK(SDL_BUTTON_RIGHT)))
+                {
+                    SDL_PumpEvents();
+                    SDL_Delay(10);
+                }
+
+                SDL_FlushEvents(SDL_EVENT_FIRST, SDL_EVENT_LAST);
+
+                selectedPiece = nullptr;
+                playerMoved = false;
+            }
+            else
             {
                 if (!Engine::start())
                 {
@@ -769,7 +1060,7 @@ int main()
             currState = UIState::PLAYING;
         }
         else
-            render(renderer, font, board, panel, moveHistory);
+            render(renderer, font, board, panel, moveHistory, network);
 
         if (currState == UIState::EXIT_CONFIRM)
             DrawExitConfirm(renderer, font, mx, my);

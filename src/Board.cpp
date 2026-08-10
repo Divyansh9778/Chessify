@@ -96,7 +96,7 @@ void Board::loadTextures(SDL_Renderer* renderer)
 {
     std::vector<std::string> pieceNames = {
         "wp", "wr", "wn", "wb", "wq", "wk",
-        "bp", "br", "bn", "bb", "bq", "bk"};
+        "bp", "br", "bn", "bb", "bq", "bk" };
 
     for (const std::string& name : pieceNames)
     {
@@ -394,7 +394,7 @@ void Board::stepForward(MoveHistory& history)
 
     replayTo(history, currentMoveIndex + 1);
 }
-        
+
 void Board::drawBoard(SDL_Renderer* renderer, TTF_Font* font)
 {
     SDL_SetRenderDrawColor(renderer, 30, 30, 30, 255);          // Set background color
@@ -714,6 +714,7 @@ void Board::executeMove(Piece* piece, int newRow, int newCol, MoveHistory& moveH
         if (target)
         {
             std::string type = target->type;
+            materialDelta += pieceValue(target->type);
 
             if (target->isWhite)
             {
@@ -746,13 +747,10 @@ void Board::executeMove(Piece* piece, int newRow, int newCol, MoveHistory& moveH
         promoCol = newCol;
         promoPawn = piece;
 
-        bool engineMove = SETTINGS.vsEngine && !piece->isWhite;
-
-        if (engineMove)
+        if (forcedPromotion)
             applyPromotion(forcedPromotion, moveHistory);
         else
             promotionActive = true;
-
         return;
     }
     break;
@@ -902,7 +900,7 @@ void Board::movePiece(SDL_Renderer* renderer, Piece* piece, int x, int y, MoveHi
         newCol < 0 || newCol >= BOARD_SIZE)
         return;
 
-	executeMove(piece, newRow, newCol, moveHistory, forcedPromotion);
+    executeMove(piece, newRow, newCol, moveHistory, forcedPromotion);
 }
 
 void Board::drawCaptured(SDL_Renderer* renderer, TTF_Font* font)
@@ -911,44 +909,44 @@ void Board::drawCaptured(SDL_Renderer* renderer, TTF_Font* font)
     int stackOffset = iconSize * 0.3f;
     int spacingBetweenTypes = 0;
 
-    std::vector<char> order = {'p', 'b', 'n', 'r', 'q'};
-    std::unordered_map<char, int> maxDisplay = {{'p', 8}, {'b', 2}, {'n', 2}, {'r', 2}, {'q', 1}};
+    std::vector<char> order = { 'p', 'b', 'n', 'r', 'q' };
+    std::unordered_map<char, int> maxDisplay = { {'p', 8}, {'b', 2}, {'n', 2}, {'r', 2}, {'q', 1} };
 
     auto drawSide = [&](std::unordered_map<std::string, int>& map, bool whiteLost, int& outEndX)
-    {
-        int yPos = whiteLost ? BOARD_OFFSET_Y - 60 : BORDER_WIDTH_Y + BOARD_WIDTH + 40;
-        int xPos = BORDER_WIDTH_X;
-
-        for (char p : order)
         {
-            std::string type = std::string(1, whiteLost ? 'w' : 'b') + p;
+            int yPos = whiteLost ? BOARD_OFFSET_Y - 60 : BORDER_WIDTH_Y + BOARD_WIDTH + 40;
+            int xPos = BORDER_WIDTH_X;
 
-            int count = std::min(map[type], maxDisplay[p]);
-            if (count <= 0) continue;
-
-            SDL_Texture* tex = pieceTextures[type];
-            if (!tex) continue;
-
-            // Draw stacked pieces
-            for (int i = 0; i < count; i++)
+            for (char p : order)
             {
-                SDL_FRect dst = {
-                    (float)(xPos + i * stackOffset),
-                    (float)yPos,
-                    (float)iconSize,
-                    (float)iconSize
-                };
+                std::string type = std::string(1, whiteLost ? 'w' : 'b') + p;
 
-                SDL_RenderTexture(renderer, tex, nullptr, &dst);
+                int count = std::min(map[type], maxDisplay[p]);
+                if (count <= 0) continue;
+
+                SDL_Texture* tex = pieceTextures[type];
+                if (!tex) continue;
+
+                // Draw stacked pieces
+                for (int i = 0; i < count; i++)
+                {
+                    SDL_FRect dst = {
+                        (float)(xPos + i * stackOffset),
+                        (float)yPos,
+                        (float)iconSize,
+                        (float)iconSize
+                    };
+
+                    SDL_RenderTexture(renderer, tex, nullptr, &dst);
+                }
+
+                xPos += stackOffset * (count - 1)
+                    + iconSize
+                    + spacingBetweenTypes;
+
             }
-
-            xPos += stackOffset * (count - 1)
-                + iconSize
-                + spacingBetweenTypes;
-
-        }
-        outEndX = xPos;
-    };
+            outEndX = xPos;
+        };
 
     int blackEndX = 0;
     int whiteEndX = 0;
@@ -1078,6 +1076,8 @@ void Board::applyPromotion(char promoChar, MoveHistory& moveHistory)
     if (!promoPawn)
         return;
 
+    promoChar = static_cast<char>(tolower(static_cast<unsigned char>(promoChar)));
+
     bool isWhite = promoPawn->isWhite;
 
     std::string newType =
@@ -1095,13 +1095,13 @@ void Board::applyPromotion(char promoChar, MoveHistory& moveHistory)
     }
 
     // Create promoted piece
-    Piece* promoted = 
+    Piece* promoted =
         new Piece(newType,
-        col * SQUARE_SIZE,
-        row * SQUARE_SIZE,
-        isWhite,
-        this
-    );
+            col * SQUARE_SIZE,
+            row * SQUARE_SIZE,
+            isWhite,
+            this
+        );
 
     pieces.push_back(promoted);
     board[row][col] = promoted;
@@ -1122,7 +1122,18 @@ void Board::applyPromotion(char promoChar, MoveHistory& moveHistory)
     Board::setLastMoved(promoted);
     promoted->hasMoved = true;
 
+    lastFromRow = promoFromRow;
+    lastFromCol = promoFromCol;
+    lastToRow = row;
+    lastToCol = col;
+
     isWhiteTurn = !isWhiteTurn;
+
+    bool givesCheck = Board::isKingInCheck(isWhiteTurn, board);
+
+    bool givesMate = false;
+    if (givesCheck)
+        givesMate = Board::isCheckmate(isWhiteTurn);
 
     // Unified recording here
     MoveRecord record(
@@ -1134,10 +1145,14 @@ void Board::applyPromotion(char promoChar, MoveHistory& moveHistory)
         promoCaptured,
         MoveType::Promotion,
         toupper(promoChar),
+        givesCheck,
+        givesMate,
         gain
     );
 
     moveHistory.addMove(record);
+    promotionMoveFinished = true;
+    moveHistory.printMoves();
 
     uciHistory += " " +
         Move::squareName(promoFromRow, promoFromCol) +
@@ -1146,6 +1161,64 @@ void Board::applyPromotion(char promoChar, MoveHistory& moveHistory)
 
     currentMoveIndex = moveHistory.size();
     viewingHistory = false;
+
+    if (Board::isCheckmate(isWhiteTurn))
+    {
+        gameOver = true;
+        whiteLost = isWhiteTurn;
+
+        std::string kingType = whiteLost ? "wk" : "bk";
+        losingKing = nullptr;
+
+        for (Piece* p : pieces)
+        {
+            if (p && p->type == kingType)
+            {
+                losingKing = p;
+                break;
+            }
+        }
+
+        if (losingKing)
+        {
+            board[losingKing->yPos / SQUARE_SIZE][losingKing->xPos / SQUARE_SIZE] = nullptr;
+
+            auto it = std::find(pieces.begin(), pieces.end(), losingKing);
+            if (it != pieces.end())
+                pieces.erase(it);
+        }
+
+        gameOverStart = SDL_GetTicks();
+        return;
+    }
+
+    if (Board::isStalemate(isWhiteTurn))
+    {
+        gameOver = true;
+        stalemate = true;
+
+        for (int r = 0; r < BOARD_SIZE; r++)
+            for (int c = 0; c < BOARD_SIZE; c++)
+                if (board[r][c] &&
+                    board[r][c]->type != "wk" &&
+                    board[r][c]->type != "bk")
+                    board[r][c] = nullptr;
+
+        pieces.erase(std::remove_if(
+            pieces.begin(),
+            pieces.end(),
+            [](Piece* p)
+            {
+                if (p->type == "wk" || p->type == "bk")
+                    return false;
+                delete p;
+                return true;
+            }),
+            pieces.end());
+
+        gameOverStart = SDL_GetTicks();
+        return;
+    }
 }
 
 void Board::highlightCheckedKing(SDL_Renderer* renderer)
@@ -1320,9 +1393,9 @@ void Board::drawEndText(SDL_Renderer* renderer, TTF_Font* font)
 
     SDL_Color col;
     if (stalemate)
-        col = {0, 0, 0, 204};
+        col = { 0, 0, 0, 204 };
     else
-        col = {204, 0, 0, 204};
+        col = { 204, 0, 0, 204 };
 
     int w, h;
     TTF_GetStringSize(font, msg, strlen(msg), &w, &h);
@@ -1351,4 +1424,72 @@ Piece* Board::getPieceAt(int row, int col)
         return nullptr;
 
     return board[row][col];
+}
+
+void Board::reset()
+{
+    // Delete all existing pieces
+    for (Piece* p : pieces)
+        delete p;
+
+    pieces.clear();
+
+    // Clear board array
+    for (int r = 0; r < BOARD_SIZE; r++)
+    {
+        for (int c = 0; c < BOARD_SIZE; c++)
+            board[r][c] = nullptr;
+    }
+
+    // Reset game state
+    isWhiteTurn = true;
+
+    whiteMaterial = 0;
+    blackMaterial = 0;
+
+    whiteCaptured.clear();
+    blackCaptured.clear();
+
+    currentMoveIndex = 0;
+    viewingHistory = false;
+
+    uciHistory = "position startpos moves";
+
+    // Promotion state
+    promotionActive = false;
+    promoPawn = nullptr;
+    promotionMoveFinished = false;
+    promoRow = promoCol = -1;
+    promoFromRow = promoFromCol = -1;
+    promoCaptured = '.';
+    pendingPromoMove.clear();
+
+    // Check/Game over state
+    blinkCheck = false;
+    blinkStart = 0;
+
+    gameOver = false;
+    stalemate = false;
+
+    losingKing = nullptr;
+    whiteLost = false;
+
+    kingTiltAngle = 0.0f;
+    gameOverStart = 0;
+
+    selectedPiece = nullptr;
+    lastMovedPiece = nullptr;
+
+    // Put all pieces back
+    initializePieces();
+}
+
+bool Board::hasFinishedPromotionMove() const
+{
+    return promotionMoveFinished;
+}
+
+void Board::clearPromotionFinishedFlag()
+{
+    promotionMoveFinished = false;
 }

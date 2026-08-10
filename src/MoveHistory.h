@@ -115,6 +115,8 @@ public:
     {
         return moves;
     }
+
+    void reset();
 };
 
 #endif

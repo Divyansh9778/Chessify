@@ -16,7 +16,7 @@ bool GameController::playMove(SDL_Renderer *renderer,
                               int mouseY,
                               char promotion)
 {
-    if (!network.isMyTurn())
+    if (network.isConnected() && !network.isMyTurn())
         return false;
 
     size_t oldSize = history.size();
@@ -28,11 +28,13 @@ bool GameController::playMove(SDL_Renderer *renderer,
                     history,
                     promotion);
 
-    bool movePlayed = (history.size() > oldSize);
+    bool movePlayed = (history.size() > oldSize ||
+        board.hasFinishedPromotionMove());
     if (movePlayed)
     {
         const MoveRecord& lastMove = history.getMoves().back();
         network.sendMove(lastMove);
+        board.clearPromotionFinishedFlag();
 
         // Multiplayer will use this.
         // Replay will use this.

@@ -1,6 +1,7 @@
 #include "Constants.h"
 #include "MovePanel.h"
 #include "MoveHistory.h"
+#include "network/PlayerColor.h"
 
 #include <SDL3_ttf/SDL_ttf.h>
 #include <SDL3/SDL_surface.h>
@@ -14,7 +15,7 @@
 
 MovePanel::MovePanel(float px, float py, float w, float h) : x(px), y(py), width(w), height(h) {}
 
-void MovePanel::draw(SDL_Renderer* renderer, TTF_Font* font, const MoveHistory& history)
+void MovePanel::draw(SDL_Renderer* renderer, TTF_Font* font, const MoveHistory& history, PlayerColor playerColor)
 {
     // Background
     SDL_SetRenderDrawColor(renderer, 28, 28, 28, 255);
@@ -45,6 +46,42 @@ void MovePanel::draw(SDL_Renderer* renderer, TTF_Font* font, const MoveHistory& 
 
     SDL_DestroySurface(titleSurf);
     SDL_DestroyTexture(titleTex);
+
+    // ---- PLAYER COLOR ----
+    std::string colorText;
+
+    if (playerColor == PlayerColor::White)
+        colorText = "Playing as White";
+    else if (playerColor == PlayerColor::Black)
+        colorText = "Playing as Black";
+    else
+        colorText = "Playing as ...";
+
+    SDL_Color colorTextColor = { 180, 180, 180, 255 };
+
+    SDL_Surface* colorSurf =
+        TTF_RenderText_Blended(
+            font,
+            colorText.c_str(),
+            colorText.length(),
+            colorTextColor
+        );
+
+    SDL_Texture* colorTex =
+        SDL_CreateTextureFromSurface(renderer, colorSurf);
+
+    SDL_FRect colorRect =
+    {
+        x + (width - colorSurf->w * 0.8f) / 2.0f,
+        y + 65,
+        colorSurf->w * 0.8f,
+        colorSurf->h * 0.8f
+    };
+
+    SDL_RenderTexture(renderer, colorTex, nullptr, &colorRect);
+
+    SDL_DestroySurface(colorSurf);
+    SDL_DestroyTexture(colorTex);
 
     // Render move list
     float lineHeight = TTF_GetFontHeight(font) - 10;

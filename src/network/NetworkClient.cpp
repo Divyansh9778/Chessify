@@ -4,6 +4,7 @@
 #include <memory>
 
 #include "NetworkClient.h"
+#include "ProtocolUtils.h"
 
 #include <iostream>
 
@@ -24,6 +25,8 @@ NetworkClient::~NetworkClient()
 
 bool NetworkClient::connect(const std::string& address, int port)
 {
+    ws = std::make_unique<websocket::stream<tcp::socket>>(ioContext);
+
     try
     {
         tcp::resolver resolver(ioContext);
@@ -35,6 +38,9 @@ bool NetworkClient::connect(const std::string& address, int port)
 
         connected = true;
         running = true;
+        disconnected = false;
+        ready = false;
+
         startListening();
 
         std::cout << "[Network] Connected to "
@@ -65,45 +71,71 @@ void NetworkClient::startListening()
 
                     ws->read(buffer);
 
+                    if (!running)
+                        break;
+
                     std::string msg =
                         beast::buffers_to_string(buffer.data());
 
                     std::cout << "[Network] Received: "
                         << msg << '\n';
 
-                    if (msg == "WHITE")
-                    {
-                        myColor = PlayerColor::White;
-                        myTurn = true;
+                    NetworkPacket packet = parsePacket(msg);
 
-                        std::cout << "[Network] You are WHITE\n";
-                        continue;
+                    switch (packet.type)
+                    {
+                    case MessageType::Start:
+                    {
+                        if (packet.payload == "WHITE")
+                        {
+                            myColor = PlayerColor::White;
+                            myTurn = true;
+                            ready = true;
+
+                            std::cout << "[Network] You are WHITE\n";
+                        }
+                        else if (packet.payload == "BLACK")
+                        {
+                            myColor = PlayerColor::Black;
+                            myTurn = false;
+                            ready = true;
+
+                            std::cout << "[Network] You are BLACK\n";
+                        }
+
+                        break;
                     }
 
-                    if (msg == "BLACK")
+                    case MessageType::Move:
                     {
-                        myColor = PlayerColor::Black;
-                        myTurn = false;
+                        MoveMessage move = deserialize(packet.payload);
 
-                        std::cout << "[Network] You are BLACK\n";
-                        continue;
+                        {
+                            std::lock_guard<std::mutex> lock(queueMutex);
+                            incomingMoves.push(move);
+                            myTurn = true;
+                        }
+
+                        std::cout << "[Network] Move queued\n";
+                        break;
                     }
 
-                    MoveMessage move = deserialize(msg);
-
-                    {
-                        std::lock_guard<std::mutex> lock(queueMutex);
-                        incomingMoves.push(move);
-
-                        myTurn = true;
+                    default:
+                        std::cout << "[Network] Unknown packet: "
+                            << msg << '\n';
+                        break;
                     }
-
-                    std::cout << "[Network] Move queued\n";
                 }
-                catch (...)
+                catch (const std::exception& e)
                 {
+                    std::cout << "[Network] Connection lost: "
+                        << e.what() << '\n';
+
                     running = false;
                     connected = false;
+                    disconnected = true;
+
+                    break;
                 }
             }
         });
@@ -111,20 +143,24 @@ void NetworkClient::startListening()
 
 void NetworkClient::disconnect()
 {
-    if (!connected)
+    if (!running)
         return;
 
     running = false;
 
+    beast::error_code ec;
+
+    ws->next_layer().cancel(ec);
+
     if (receiveThread.joinable())
         receiveThread.join();
 
-    beast::error_code ec;
-    ws->close(websocket::close_code::normal, ec);
-
     connected = false;
+    ready = false;
+    myTurn = false;
+    disconnected = false;
 }
-
+    
 bool NetworkClient::isConnected() const
 {
     return connected;
@@ -143,7 +179,9 @@ bool NetworkClient::sendMove(const MoveRecord &move)
     msg.toCol = move.toCol;
     msg.promotion = move.promotionPiece;
 
-    std::string data = serialize(msg);
+    std::string data = makePacket(
+        MessageType::Move,
+        serialize(msg));
 
     try
     {
@@ -160,38 +198,41 @@ bool NetworkClient::sendMove(const MoveRecord &move)
             << e.what() << '\n';
 
         connected = false;
+        running = false;
+        disconnected = true;
         return false;
     }
 }
 
-bool NetworkClient::receiveMessage(std::string& msg)
-{
-    if (!connected)
-        return false;
-
-    try
-    {
-        beast::flat_buffer buffer;
-
-        ws->read(buffer);
-
-        msg = beast::buffers_to_string(buffer.data());
-
-        std::cout << "[Network] Received: "
-            << msg << '\n';
-
-        return true;
-    }
-    catch (std::exception& e)
-    {
-        std::cout << "[Network] Receive failed: "
-            << e.what() << '\n';
-
-        connected = false;
-
-        return false;
-    }
-}
+//bool NetworkClient::receiveMessage(std::string& msg)
+//{
+//    if (!connected)
+//        return false;
+//        
+//    try
+//    {
+//        beast::flat_buffer buffer;
+//
+//        ws->read(buffer);
+//
+//        msg = beast::buffers_to_string(buffer.data());
+//
+//        std::cout << "[Network] Received: "
+//            << msg << '\n';
+//
+//        return true;
+//    }
+//    catch (std::exception& e)
+//    {
+//        std::cout << "[Network] Receive failed: "
+//            << e.what() << '\n';
+//
+//        connected = false;
+//        running = false;
+//        disconnected = true;
+//        return false;
+//    }
+//}
 
 bool NetworkClient::hasPendingMessages()
 {
@@ -217,4 +258,19 @@ PlayerColor NetworkClient::getPlayerColor() const
 bool NetworkClient::isMyTurn() const
 {
     return myTurn;
+}
+
+bool NetworkClient::isReady() const
+{
+    return ready;
+}
+
+bool NetworkClient::hasDisconnected() const
+{
+    return disconnected;
+}
+
+void NetworkClient::clearDisconnectFlag()
+{
+    disconnected = false;
 }
