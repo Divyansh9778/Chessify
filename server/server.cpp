@@ -24,8 +24,8 @@ int main()
         int PORT = portEnv ? std::stoi(portEnv) : 9002;
         std::cout << "[SERVER] Starting on port " << PORT << '\n';
 
-        tcp::acceptor acceptor(io, tcp::endpoint(net::ip::make_address("0.0.0.0"), PORT));
-        std::cout << "[SERVER] Listening on port 9002\n";
+        tcp::acceptor acceptor(io, tcp::endpoint(tcp::v4(), PORT));
+        std::cout << "[SERVER] Listening on port " << PORT << '\n';
 
         std::cout << "[SERVER] Waiting for Player 1...\n";
 
