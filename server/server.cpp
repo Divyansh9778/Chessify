@@ -21,10 +21,10 @@ int main()
 
         const char* portEnv = std::getenv("PORT");
         int PORT = portEnv ? std::stoi(portEnv) : 9002;
-        std::cerr << "[SERVER] Creating acceptor on port " << PORT << std::endl;
+        std::cout << "[SERVER] Creating acceptor on port " << PORT << std::endl;
 
         tcp::acceptor acceptor(io, tcp::endpoint(tcp::v4(), PORT));
-        std::cerr << "[SERVER] Listening on port "<< PORT << std::endl;
+        std::cout << "[SERVER] Listening on port "<< PORT << std::endl;
 
         std::cout << "[SERVER] Waiting for Player 1...\n";
 

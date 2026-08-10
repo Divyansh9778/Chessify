@@ -36,7 +36,7 @@ public:
     bool isConnected() const;
 
     bool sendMove(const MoveRecord& move);
-    //bool receiveMessage(std::string& msg);
+    bool receiveMessage(std::string& msg);
 
     bool hasPendingMessages();
     MoveMessage getNextMove();

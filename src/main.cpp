@@ -1014,7 +1014,7 @@ int main()
                 currState = UIState::CONNECTING;
                 DrawConnectingScreen(renderer, font, board, "Waiting for the opponent...");
 
-                if (!network.connect("127.0.0.1", 9002))
+                if (!network.connect("chessify-production.up.railway.app", 443))
                 {
                     DrawConnectingScreen(renderer, font, board, "Server not found!");
                     SDL_Delay(2000);

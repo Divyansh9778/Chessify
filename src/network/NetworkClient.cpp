@@ -231,8 +231,7 @@ void NetworkClient::disconnect()
 
         // Cancel the underlying TCP operation so
         // ws->read() wakes up.
-        beast::get_lowest_layer(*ws)
-            .cancel(ec);
+        beast::get_lowest_layer(*ws).cancel();
     }
 
     if (receiveThread.joinable())
@@ -242,11 +241,7 @@ void NetworkClient::disconnect()
     {
         beast::error_code ec;
 
-        ws->next_layer()
-            .shutdown(
-                ssl::stream_base::shutdown_both,
-                ec
-            );
+        ws->next_layer().shutdown(ec);
 
         beast::get_lowest_layer(*ws)
             .socket()
