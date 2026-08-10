@@ -6,6 +6,7 @@ RUN apt-get update && \
     cmake \
     make \
     libboost-all-dev \
+    libssl-dev \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

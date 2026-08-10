@@ -1,19 +1,27 @@
 #pragma once
+
 #include "../MoveRecord.h"
 #include "NetworkMessages.h"
 #include "PlayerColor.h"
-    
+
 #include <queue>
 #include <memory>
-
 #include <thread>
 #include <atomic>
+#include <mutex>
 
 #include <boost/asio.hpp>
+#include <boost/asio/ssl.hpp>
+
+#include <boost/beast.hpp>
+#include <boost/beast/ssl.hpp>
 #include <boost/beast/websocket.hpp>
 
 namespace net = boost::asio;
-namespace websocket = boost::beast::websocket;
+namespace ssl = boost::asio::ssl;
+namespace beast = boost::beast;
+namespace websocket = beast::websocket;
+
 using tcp = net::ip::tcp;
 
 class NetworkClient
@@ -22,12 +30,12 @@ public:
     NetworkClient();
     ~NetworkClient();
 
-    bool connect(const std::string &address, int port);
+    bool connect(const std::string& address, int port);
     void disconnect();
 
     bool isConnected() const;
 
-    bool sendMove(const MoveRecord &move);
+    bool sendMove(const MoveRecord& move);
     //bool receiveMessage(std::string& msg);
 
     bool hasPendingMessages();
@@ -36,7 +44,6 @@ public:
     bool isReady() const;
 
     void startListening();
-    //void stopListening();
 
     PlayerColor getPlayerColor() const;
     bool isMyTurn() const;
@@ -46,18 +53,28 @@ public:
 
 private:
     net::io_context ioContext;
-    std::unique_ptr<websocket::stream<tcp::socket>> ws;
+
+    ssl::context sslContext{
+        ssl::context::tls_client
+    };
+
+    using WebSocketStream =
+        websocket::stream<
+        beast::ssl_stream<beast::tcp_stream>
+        >;
+
+    std::unique_ptr<WebSocketStream> ws;
 
     std::queue<MoveMessage> incomingMoves;
     std::mutex queueMutex;
-    
-    std::thread receiveThread;
-
-    PlayerColor myColor = PlayerColor::None;
 
     std::atomic<bool> running = false;
     std::atomic<bool> ready = false;
     std::atomic<bool> myTurn = false;
     std::atomic<bool> connected = false;
     std::atomic<bool> disconnected = false;
+
+    std::thread receiveThread;
+
+    PlayerColor myColor = PlayerColor::None;
 };

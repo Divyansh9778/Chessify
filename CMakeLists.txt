@@ -7,7 +7,9 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 find_package(SDL3 REQUIRED)
 find_package(SDL3_image REQUIRED)
 find_package(SDL3_ttf REQUIRED)
+
 find_package(Boost REQUIRED COMPONENTS system)
+find_package(OpenSSL REQUIRED)
 
 set(SRC_FILES
     src/main.cpp
@@ -54,6 +56,9 @@ target_link_libraries(Chessify PRIVATE
     SDL3_image::SDL3_image
     SDL3_ttf::SDL3_ttf
     Boost::headers
+    Boost::system
+    OpenSSL::SSL
+    OpenSSL::Crypto
 )
 
 target_link_libraries(ChessifyServer PRIVATE
