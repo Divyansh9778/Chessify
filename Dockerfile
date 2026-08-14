@@ -17,4 +17,4 @@ RUN cmake -S server -B server/build \
 
 RUN cmake --build server/build --config Release
 
-CMD ["sh", "-c", "echo '[DOCKER] Starting ChessifyServer'; exec ./server/build/ChessifyServer"]
+CMD ["sh", "-c", "echo '[DOCKER] Starting ChessifyServer'; echo '[DOCKER] Current directory:'; pwd; echo '[DOCKER] Binary:'; ls -lh ./server/build/ChessifyServer; echo '[DOCKER] Dependencies:'; ldd ./server/build/ChessifyServer; echo '[DOCKER] Executing server...'; exec ./server/build/ChessifyServer"]

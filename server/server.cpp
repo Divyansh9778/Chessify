@@ -65,7 +65,7 @@ void forwardMessages(
 
 int main()
 {
-    std::cout << "[SERVER] Starting...\n";
+    std::cerr << "[SERVER] Starting...\n";
 
     try
     {
@@ -79,7 +79,7 @@ int main()
             ? std::stoi(portEnv)
             : 9002;
 
-        std::cout
+        std::cerr
             << "[SERVER] Creating acceptor on port "
             << PORT
             << '\n';
@@ -92,7 +92,7 @@ int main()
             )
         );
 
-        std::cout
+        std::cerr
             << "[SERVER] Listening on port "
             << PORT
             << '\n';
@@ -101,14 +101,14 @@ int main()
         // PLAYER 1
         // ==========================================
 
-        std::cout
+        std::cerr
             << "[SERVER] Waiting for Player 1...\n";
 
         tcp::socket socket1(io);
 
         acceptor.accept(socket1);
 
-        std::cout
+        std::cerr
             << "[SERVER] Player 1 TCP connected\n";
 
         websocket::stream<tcp::socket>
@@ -116,7 +116,7 @@ int main()
 
         player1.accept();
 
-        std::cout
+        std::cerr
             << "[SERVER] Player 1 WebSocket ready\n";
 
 
@@ -124,14 +124,14 @@ int main()
         // PLAYER 2
         // ==========================================
 
-        std::cout
+        std::cerr
             << "[SERVER] Waiting for Player 2...\n";
 
         tcp::socket socket2(io);
 
         acceptor.accept(socket2);
 
-        std::cout
+        std::cerr
             << "[SERVER] Player 2 TCP connected\n";
 
         websocket::stream<tcp::socket>
@@ -139,7 +139,7 @@ int main()
 
         player2.accept();
 
-        std::cout
+        std::cerr
             << "[SERVER] Player 2 WebSocket ready\n";
 
 
@@ -147,7 +147,7 @@ int main()
         // START GAME
         // ==========================================
 
-        std::cout
+        std::cerr
             << "[SERVER] Game Started!\n";
 
         player1.write(
@@ -168,7 +168,7 @@ int main()
             )
         );
 
-        std::cout
+        std::cerr
             << "[SERVER] Assigned colors\n";
 
 
@@ -193,12 +193,12 @@ int main()
         whiteThread.join();
         blackThread.join();
 
-        std::cout
+        std::cerr
             << "[SERVER] Server shutting down\n";
     }
     catch (const std::exception& e)
     {
-        std::cout
+        std::cerr
             << "[SERVER] ERROR: "
             << e.what()
             << '\n';
