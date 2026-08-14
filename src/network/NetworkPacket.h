@@ -7,6 +7,5 @@
 struct NetworkPacket
 {
     MessageType type = MessageType::Unknown;
-
     std::string payload;
 };

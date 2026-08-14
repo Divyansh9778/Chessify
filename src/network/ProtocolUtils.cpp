@@ -12,37 +12,46 @@ NetworkPacket parsePacket(const std::string& message)
     in >> command;
 
     if (command == "START")
-    {
         packet.type = MessageType::Start;
-    }
+
     else if (command == "MOVE")
-    {
         packet.type = MessageType::Move;
-    }
+
+    else if (command == "CREATE_ROOM")
+        packet.type = MessageType::CreateRoom;
+
+    else if (command == "JOIN_ROOM")
+        packet.type = MessageType::JoinRoom;
+
+    else if (command == "ROOM_CREATED")
+        packet.type = MessageType::RoomCreated;
+
+    else if (command == "ROOM_JOINED")
+        packet.type = MessageType::RoomJoined;
+
+    else if (command == "ROOM_FULL")
+        packet.type = MessageType::RoomFull;
+
+    else if (command == "ROOM_NOT_FOUND")
+        packet.type = MessageType::RoomNotFound;
+
     else if (command == "RESIGN")
-    {
         packet.type = MessageType::Resign;
-    }
+
     else if (command == "DRAW_OFFER")
-    {
         packet.type = MessageType::DrawOffer;
-    }
+
     else if (command == "DRAW_ACCEPT")
-    {
         packet.type = MessageType::DrawAccept;
-    }
+
     else if (command == "DRAW_DECLINE")
-    {
         packet.type = MessageType::DrawDecline;
-    }
+
     else if (command == "CHAT")
-    {
         packet.type = MessageType::Chat;
-    }
+
     else if (command == "DISCONNECT")
-    {
         packet.type = MessageType::Disconnect;
-    }
 
     std::getline(in, packet.payload);
 
@@ -66,6 +75,30 @@ std::string makePacket(
 
     case MessageType::Move:
         prefix = "MOVE";
+        break;
+
+    case MessageType::CreateRoom:
+        prefix = "CREATE_ROOM";
+        break;
+
+    case MessageType::JoinRoom:
+        prefix = "JOIN_ROOM";
+        break;
+
+    case MessageType::RoomCreated:
+        prefix = "ROOM_CREATED";
+        break;
+
+    case MessageType::RoomJoined:
+        prefix = "ROOM_JOINED";
+        break;
+
+    case MessageType::RoomFull:
+        prefix = "ROOM_FULL";
+        break;
+
+    case MessageType::RoomNotFound:
+        prefix = "ROOM_NOT_FOUND";
         break;
 
     case MessageType::Resign:

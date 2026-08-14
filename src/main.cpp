@@ -1014,7 +1014,12 @@ int main()
                 currState = UIState::CONNECTING;
                 DrawConnectingScreen(renderer, font, board, "Waiting for the opponent...");
 
-                if (!network.connect("chessify-production.up.railway.app", 443))
+                if (network.connect("chessify-production.up.railway.app", 443))
+                {
+                    std::cout << "Connected to Railway!\n";
+                    network.createRoom();
+                }
+                else
                 {
                     DrawConnectingScreen(renderer, font, board, "Server not found!");
                     SDL_Delay(2000);

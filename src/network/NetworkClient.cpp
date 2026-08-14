@@ -136,6 +136,83 @@ bool NetworkClient::connect(
     }
 }
 
+bool NetworkClient::createRoom()
+{
+    if (!connected || !ws)
+        return false;
+
+    try
+    {
+        std::string data =
+            makePacket(MessageType::CreateRoom);
+
+        ws->write(
+            net::buffer(data)
+        );
+
+        std::cout
+            << "[Network] Requested room creation\n";
+
+        return true;
+    }
+    catch (const std::exception& e)
+    {
+        std::cout
+            << "[Network] Create room failed: "
+            << e.what()
+            << '\n';
+
+        connected = false;
+        running = false;
+        disconnected = true;
+
+        return false;
+    }
+}
+
+bool NetworkClient::joinRoom(
+    const std::string& code)
+{
+    if (!connected || !ws)
+        return false;
+
+    if (code.empty())
+        return false;
+
+    try
+    {
+        std::string data =
+            makePacket(
+                MessageType::JoinRoom,
+                code
+            );
+
+        ws->write(
+            net::buffer(data)
+        );
+
+        std::cout
+            << "[Network] Joining room: "
+            << code
+            << '\n';
+
+        return true;
+    }
+    catch (const std::exception& e)
+    {
+        std::cout
+            << "[Network] Join room failed: "
+            << e.what()
+            << '\n';
+
+        connected = false;
+        running = false;
+        disconnected = true;
+
+        return false;
+    }
+}
+
 void NetworkClient::startListening()
 {
     receiveThread = std::thread([this]()
@@ -163,6 +240,45 @@ void NetworkClient::startListening()
 
                 switch (packet.type)
                 {
+                case MessageType::RoomCreated:
+                {
+                    roomCode = packet.payload;
+
+                    std::cout
+                        << "[Network] Room created: "
+                        << roomCode
+                        << '\n';
+
+                    break;
+                }
+
+                case MessageType::RoomJoined:
+                {
+                    roomCode = packet.payload;
+
+                    std::cout
+                        << "[Network] Joined room: "
+                        << roomCode
+                        << '\n';
+
+                    break;
+                }
+
+                case MessageType::RoomFull:
+                {
+                    std::cout
+                        << "[Network] Room is full\n";
+
+                    break;
+                }
+
+                case MessageType::RoomNotFound:
+                {
+                    std::cout
+                        << "[Network] Room not found\n";
+
+                    break;
+                }
                 case MessageType::Start:
                 {
                     if (packet.payload == "WHITE")
@@ -278,6 +394,8 @@ void NetworkClient::disconnect()
     connected = false;
     ready = false;
     myTurn = false;
+    roomCode.clear();
+
     disconnected = false;
 }
 
@@ -381,4 +499,9 @@ bool NetworkClient::hasDisconnected() const
 void NetworkClient::clearDisconnectFlag()
 {
     disconnected = false;
+}
+
+std::string NetworkClient::getRoomCode() const
+{
+    return roomCode;
 }

@@ -9,6 +9,7 @@
 #include <thread>
 #include <atomic>
 #include <mutex>
+#include <string>
 
 #include <boost/asio.hpp>
 #include <boost/asio/ssl.hpp>
@@ -21,7 +22,6 @@ namespace net = boost::asio;
 namespace ssl = boost::asio::ssl;
 namespace beast = boost::beast;
 namespace websocket = beast::websocket;
-
 using tcp = net::ip::tcp;
 
 class NetworkClient
@@ -34,6 +34,12 @@ public:
     void disconnect();
 
     bool isConnected() const;
+
+    // Room management
+    bool createRoom();
+    bool joinRoom(const std::string& roomCode);
+    std::string getRoomCode() const;
+
     bool sendMove(const MoveRecord& move);
 
     bool hasPendingMessages();
@@ -58,9 +64,9 @@ private:
 
     using WebSocketStream =
         websocket::stream<
-            beast::ssl_stream<
-                beast::tcp_stream
-            >
+        beast::ssl_stream<
+        beast::tcp_stream
+        >
         >;
 
     std::unique_ptr<WebSocketStream> ws;
@@ -77,4 +83,6 @@ private:
     std::thread receiveThread;
 
     PlayerColor myColor = PlayerColor::None;
+
+    std::string roomCode;
 };
