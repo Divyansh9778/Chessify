@@ -6,6 +6,9 @@
 #include <boost/asio.hpp>
 #include <boost/asio/ssl.hpp>
 
+#include <openssl/ssl.h>
+#include <openssl/err.h>
+
 #include <memory>
 #include <iostream>
 
@@ -20,11 +23,10 @@ namespace ssl = boost::asio::ssl;
 using tcp = net::ip::tcp;
 
 NetworkClient::NetworkClient()
+    : sslContext(ssl::context::tls_client)
 {
-    // Temporary for development.
-    // Railway uses a valid public certificate, but Windows/OpenSSL
-    // certificate-store configuration can be handled separately.
-    sslContext.set_verify_mode(ssl::verify_none);
+    sslContext.set_default_verify_paths();
+    sslContext.set_verify_mode(ssl::verify_peer);
 }
 
 NetworkClient::~NetworkClient()
@@ -36,6 +38,12 @@ bool NetworkClient::connect(
     const std::string& address,
     int port)
 {
+    if (connected)
+        return true;
+
+    if (receiveThread.joinable())
+        disconnect();
+
     try
     {
         tcp::resolver resolver(ioContext);
@@ -67,16 +75,12 @@ bool NetworkClient::connect(
                     net::error::get_ssl_category()
                 )
             );
-
-            //beast::error_code ec{
-            //    static_cast<int>(
-            //        ::ERR_get_error()
-            //    ),
-            //    net::error::get_ssl_category()
-            //};
-
-            //throw beast::system_error(ec);
         }
+
+        // Verify certificate hostname
+        ws->next_layer().set_verify_callback(
+            ssl::host_name_verification(address)
+        );
 
         // TLS handshake
         ws->next_layer().handshake(
@@ -114,6 +118,19 @@ bool NetworkClient::connect(
 
         connected = false;
         running = false;
+        ready = false;
+        myTurn = false;
+
+        if (ws)
+        {
+            beast::error_code ec;
+
+            beast::get_lowest_layer(*ws)
+                .socket()
+                .close(ec);
+
+            ws.reset();
+        }
 
         return false;
     }
@@ -254,13 +271,13 @@ void NetworkClient::disconnect()
         beast::get_lowest_layer(*ws)
             .socket()
             .close(ec);
+
+        ws.reset();
     }
 
     connected = false;
     ready = false;
     myTurn = false;
-
-    // Don't report our own quit as opponent disconnect.
     disconnected = false;
 }
 
@@ -319,45 +336,6 @@ bool NetworkClient::sendMove(
     }
 }
 
-bool NetworkClient::receiveMessage(
-    std::string& msg)
-{
-    if (!connected || !ws)
-        return false;
-
-    try
-    {
-        beast::flat_buffer buffer;
-
-        ws->read(buffer);
-
-        msg =
-            beast::buffers_to_string(
-                buffer.data()
-            );
-
-        std::cout
-            << "[Network] Received: "
-            << msg
-            << '\n';
-
-        return true;
-    }
-    catch (const std::exception& e)
-    {
-        std::cout
-            << "[Network] Receive failed: "
-            << e.what()
-            << '\n';
-
-        connected = false;
-        running = false;
-        disconnected = true;
-
-        return false;
-    }
-}
-
 bool NetworkClient::hasPendingMessages()
 {
     std::lock_guard<std::mutex>
@@ -371,9 +349,10 @@ MoveMessage NetworkClient::getNextMove()
     std::lock_guard<std::mutex>
         lock(queueMutex);
 
-    MoveMessage move =
-        incomingMoves.front();
+    if (incomingMoves.empty())
+        return MoveMessage{};
 
+    MoveMessage move = incomingMoves.front();
     incomingMoves.pop();
 
     return move;
