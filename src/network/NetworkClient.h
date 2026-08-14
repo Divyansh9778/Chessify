@@ -60,7 +60,9 @@ private:
 
     using WebSocketStream =
         websocket::stream<
-        beast::ssl_stream<beast::tcp_stream>
+            beast::ssl_stream<
+                beast::tcp_stream
+            >
         >;
 
     std::unique_ptr<WebSocketStream> ws;

@@ -879,12 +879,6 @@ void Board::movePiece(SDL_Renderer* renderer, Piece* piece, int x, int y, MoveHi
     if (viewingHistory)
         replayTo(moveHistory, moveHistory.size());
 
-    if (!piece)
-        return;
-    if ((isWhiteTurn && !piece->isWhite) || (!isWhiteTurn && piece->isWhite))
-        return;
-
-    // If promotion UI is active, treat click as promotion selection
     if (promotionActive)
     {
         handlePromotionClick(x, y, moveHistory);
@@ -892,6 +886,10 @@ void Board::movePiece(SDL_Renderer* renderer, Piece* piece, int x, int y, MoveHi
     }
 
     if (gameOver) return;
+
+    if (!piece) return;
+    if ((isWhiteTurn && !piece->isWhite) || (!isWhiteTurn && piece->isWhite))
+        return;
 
     int newRow = (y - BORDER_WIDTH_Y) / SQUARE_SIZE;
     int newCol = (x - BORDER_WIDTH_X) / SQUARE_SIZE;
@@ -1128,6 +1126,11 @@ void Board::applyPromotion(char promoChar, MoveHistory& moveHistory)
     lastToCol = col;
 
     isWhiteTurn = !isWhiteTurn;
+
+    std::cout << "[Board] Promotion complete. "
+        << "Next turn: "
+        << (isWhiteTurn ? "WHITE" : "BLACK")
+        << '\n';
 
     bool givesCheck = Board::isKingInCheck(isWhiteTurn, board);
 

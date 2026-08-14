@@ -705,7 +705,7 @@ static void DrawConnectionLostScreen(SDL_Renderer* renderer,
         BH,
         { 255,255,255,255 });
 
-    SDL_RenderPresent(renderer);
+    //SDL_RenderPresent(renderer);
 }
 
 static void DrawExitConfirm(SDL_Renderer *r, TTF_Font *font, float mx, float my)
@@ -808,7 +808,7 @@ int main()
             else if (currState == UIState::CONNECTION_LOST)
             {
                 DrawConnectionLostScreen(renderer, font, board, mx, my);
-                continue;
+                //continue;
             }
 
             switch (event.type)

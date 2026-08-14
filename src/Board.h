@@ -118,6 +118,7 @@ private:
     Piece *selectedPiece = nullptr;
     SDL_Renderer *renderer;
 
+    int promoMaterialDelta = 0;
     bool promotionMoveFinished = false;
 };
 

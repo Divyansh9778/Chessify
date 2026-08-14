@@ -59,14 +59,23 @@ bool NetworkClient::connect(
                 ws->next_layer().native_handle(),
                 address.c_str()))
         {
-            beast::error_code ec{
-                static_cast<int>(
-                    ::ERR_get_error()
-                ),
-                net::error::get_ssl_category()
-            };
+            throw beast::system_error(
+                beast::error_code(
+                    static_cast<int>(
+                        ::ERR_get_error()
+                        ),
+                    net::error::get_ssl_category()
+                )
+            );
 
-            throw beast::system_error(ec);
+            //beast::error_code ec{
+            //    static_cast<int>(
+            //        ::ERR_get_error()
+            //    ),
+            //    net::error::get_ssl_category()
+            //};
+
+            //throw beast::system_error(ec);
         }
 
         // TLS handshake
@@ -176,11 +185,10 @@ void NetworkClient::startListening()
                             lock(queueMutex);
 
                         incomingMoves.push(move);
-                        myTurn = true;
                     }
 
-                    std::cout
-                        << "[Network] Move queued\n";
+                    myTurn = true;
+                    std::cout << "[Network] Move queued\n";
 
                     break;
                 }
