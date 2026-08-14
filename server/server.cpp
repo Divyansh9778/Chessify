@@ -65,12 +65,11 @@ void forwardMessages(
 
 int main()
 {
+    std::cout << "[SERVER] Starting...\n";
+
     try
     {
         net::io_context io;
-
-        std::cout
-            << "[SERVER] Starting...\n";
 
         const char* portEnv =
             std::getenv("PORT");

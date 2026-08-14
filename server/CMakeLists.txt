@@ -13,6 +13,7 @@ add_executable(ChessifyServer
 )
 
 target_include_directories(ChessifyServer PRIVATE
+    ${Boost_INCLUDE_DIRS}
     ../src
     ../src/network
 )
