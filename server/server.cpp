@@ -7,13 +7,17 @@
 #include <string>
 #include <cstdlib>
 #include <thread>
-#include <mutex>
 
 namespace beast = boost::beast;
 namespace websocket = beast::websocket;
 namespace net = boost::asio;
 
 using tcp = net::ip::tcp;
+
+
+// ============================================================
+// Forward messages from one player to the other
+// ============================================================
 
 void forwardMessages(
     websocket::stream<tcp::socket>& from,
@@ -26,50 +30,74 @@ void forwardMessages(
         {
             beast::flat_buffer buffer;
 
+            std::cerr
+                << "[SERVER] Waiting for "
+                << playerName
+                << " move..."
+                << std::endl;
+
             from.read(buffer);
 
             std::string msg =
                 beast::buffers_to_string(buffer.data());
 
-            std::cout
-                << "[" << playerName << "] "
-                << msg << '\n';
-
-            to.write(net::buffer(msg));
-
-            std::cout
-                << "[SERVER] Forwarded "
+            std::cerr
+                << "["
                 << playerName
-                << " -> opponent\n";
+                << " -> SERVER] "
+                << msg
+                << std::endl;
+
+            to.write(
+                net::buffer(msg)
+            );
+
+            std::cerr
+                << "[SERVER -> OPPONENT] "
+                << playerName
+                << " move forwarded"
+                << std::endl;
         }
     }
     catch (const beast::system_error& e)
     {
-        std::cout
+        std::cerr
             << "[SERVER] "
             << playerName
             << " disconnected: "
             << e.what()
-            << '\n';
+            << std::endl;
     }
     catch (const std::exception& e)
     {
-        std::cout
+        std::cerr
             << "[SERVER] "
             << playerName
             << " error: "
             << e.what()
-            << '\n';
+            << std::endl;
     }
 }
 
+
+// ============================================================
+// MAIN
+// ============================================================
+
 int main()
 {
-    std::cerr << "[SERVER] Starting...\n";
+    std::cerr
+        << "[SERVER] Starting..."
+        << std::endl;
 
     try
     {
         net::io_context io;
+
+
+        // ====================================================
+        // Railway provides PORT through environment variable
+        // ====================================================
 
         const char* portEnv =
             std::getenv("PORT");
@@ -79,10 +107,16 @@ int main()
             ? std::stoi(portEnv)
             : 9002;
 
+
         std::cerr
             << "[SERVER] Creating acceptor on port "
             << PORT
-            << '\n';
+            << std::endl;
+
+
+        // ====================================================
+        // Listen on all network interfaces
+        // ====================================================
 
         tcp::acceptor acceptor(
             io,
@@ -92,63 +126,81 @@ int main()
             )
         );
 
+
         std::cerr
             << "[SERVER] Listening on port "
             << PORT
-            << '\n';
+            << std::endl;
 
-        // ==========================================
+
+        // ====================================================
         // PLAYER 1
-        // ==========================================
+        // ====================================================
 
         std::cerr
-            << "[SERVER] Waiting for Player 1...\n";
+            << "[SERVER] Waiting for Player 1..."
+            << std::endl;
 
         tcp::socket socket1(io);
 
         acceptor.accept(socket1);
 
         std::cerr
-            << "[SERVER] Player 1 TCP connected\n";
+            << "[SERVER] Player 1 TCP connected"
+            << std::endl;
+
 
         websocket::stream<tcp::socket>
-            player1(std::move(socket1));
+            player1(
+                std::move(socket1)
+            );
 
         player1.accept();
 
         std::cerr
-            << "[SERVER] Player 1 WebSocket ready\n";
+            << "[SERVER] Player 1 WebSocket ready"
+            << std::endl;
 
 
-        // ==========================================
+        // ====================================================
         // PLAYER 2
-        // ==========================================
+        // ====================================================
 
         std::cerr
-            << "[SERVER] Waiting for Player 2...\n";
+            << "[SERVER] Waiting for Player 2..."
+            << std::endl;
 
         tcp::socket socket2(io);
 
         acceptor.accept(socket2);
 
         std::cerr
-            << "[SERVER] Player 2 TCP connected\n";
+            << "[SERVER] Player 2 TCP connected"
+            << std::endl;
+
 
         websocket::stream<tcp::socket>
-            player2(std::move(socket2));
+            player2(
+                std::move(socket2)
+            );
 
         player2.accept();
 
         std::cerr
-            << "[SERVER] Player 2 WebSocket ready\n";
+            << "[SERVER] Player 2 WebSocket ready"
+            << std::endl;
 
 
-        // ==========================================
+        // ====================================================
         // START GAME
-        // ==========================================
+        // ====================================================
 
         std::cerr
-            << "[SERVER] Game Started!\n";
+            << "[SERVER] Game Started!"
+            << std::endl;
+
+
+        // Player 1 = White
 
         player1.write(
             net::buffer(
@@ -159,6 +211,9 @@ int main()
             )
         );
 
+
+        // Player 2 = Black
+
         player2.write(
             net::buffer(
                 makePacket(
@@ -168,13 +223,21 @@ int main()
             )
         );
 
+
         std::cerr
-            << "[SERVER] Assigned colors\n";
+            << "[SERVER] Assigned colors"
+            << std::endl;
 
 
-        // ==========================================
+        // ====================================================
         // TWO-WAY MESSAGE FORWARDING
-        // ==========================================
+        //
+        // Thread 1:
+        //     White -> Black
+        //
+        // Thread 2:
+        //     Black -> White
+        // ====================================================
 
         std::thread whiteThread(
             forwardMessages,
@@ -183,6 +246,7 @@ int main()
             "WHITE"
         );
 
+
         std::thread blackThread(
             forwardMessages,
             std::ref(player2),
@@ -190,21 +254,29 @@ int main()
             "BLACK"
         );
 
+
+        // ====================================================
+        // Wait for both forwarding threads
+        // ====================================================
+
         whiteThread.join();
         blackThread.join();
 
+
         std::cerr
-            << "[SERVER] Server shutting down\n";
+            << "[SERVER] Server shutting down"
+            << std::endl;
     }
     catch (const std::exception& e)
     {
         std::cerr
             << "[SERVER] ERROR: "
             << e.what()
-            << '\n';
+            << std::endl;
 
         return 1;
     }
+
 
     return 0;
 }
