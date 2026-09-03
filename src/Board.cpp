@@ -1062,7 +1062,10 @@ void Board::drawCaptured(SDL_Renderer* renderer, TTF_Font* font)
 
     auto drawSide = [&](std::unordered_map<std::string, int>& map, bool whiteLost, int& outEndX)
         {
-            int yPos = whiteLost ? BOARD_OFFSET_Y - 60 : BORDER_WIDTH_Y + BOARD_WIDTH + 40;
+            int yPos =
+                (whitePerspective == whiteLost)
+                ? BOARD_OFFSET_Y - 60
+                : BORDER_WIDTH_Y + BOARD_WIDTH + 40;
             int xPos = BORDER_WIDTH_X;
 
             for (char p : order)
@@ -1123,8 +1126,21 @@ void Board::drawCaptured(SDL_Renderer* renderer, TTF_Font* font)
             SDL_Texture* tex =
                 SDL_CreateTextureFromSurface(renderer, surf);
 
-            int yPos = whiteWinning ? BORDER_WIDTH_Y + BOARD_WIDTH + 45 : BOARD_OFFSET_Y - 45;
+            int yPos;
             int xPos = whiteWinning ? blackEndX : whiteEndX;
+
+            if (whitePerspective)
+            {
+                yPos = whiteWinning
+                    ? BORDER_WIDTH_Y + BOARD_WIDTH + 45
+                    : BOARD_OFFSET_Y - 50;
+            }
+            else
+            {
+                yPos = whiteWinning
+                    ? BOARD_OFFSET_Y - 50
+                    : BORDER_WIDTH_Y + BOARD_WIDTH + 45;
+            }
 
             float scale = 0.8f;
 

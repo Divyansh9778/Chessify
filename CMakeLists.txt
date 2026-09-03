@@ -43,6 +43,12 @@ endif()
 
 add_executable(Chessify ${SRC_FILES} "src/network/PlayerColor.h" "src/network/NetworkProtocol.h" "src/network/NetworkPacket.h" "src/network/ProtocolUtils.h" "src/network/ProtocolUtils.cpp" "server/RoomManager.h" "server/RoomManager.cpp" "server/Room.h")
 
+if(WIN32)
+    set_target_properties(Chessify PROPERTIES
+        LINK_FLAGS "/SUBSYSTEM:WINDOWS /ENTRY:mainCRTStartup"
+    )
+endif()
+
 add_executable(ChessifyServer
     server/server.cpp
  "src/network/PlayerColor.h" "src/network/NetworkProtocol.h" "src/network/NetworkPacket.h" "src/network/ProtocolUtils.h" "src/network/ProtocolUtils.cpp" "server/RoomManager.h" "server/RoomManager.cpp" "server/Room.h")
