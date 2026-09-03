@@ -54,7 +54,7 @@ public:
     Piece *selectPiece(int x, int y);                                                                                       // Select a piece based on coordinates
     std::vector<Piece *> &getPieces();                                                                                      // Get all pieces on the board
     
-    void executeMove(Piece *piece, int newRow, int newCol, MoveHistory &moveHistory, char forcedPromotion = 0);
+    bool executeMove(Piece *piece, int newRow, int newCol, MoveHistory &moveHistory, char forcedPromotion = 0);
     void movePiece(SDL_Renderer *renderer, Piece *piece, int x, int y, MoveHistory &moveHistory, char forcedPromotion = 0); // Move a piece to the new position
 
     static Piece *lastMovedPiece;                                      // Track the last moved piece (shared across all Board instances)
@@ -75,6 +75,21 @@ public:
 
     bool stalemate = false;
     bool isStalemate(bool isWhite);
+
+    int halfmoveClock = 0;
+
+    // Position repetition tracking
+    std::unordered_map<std::string, int> positionOccurrences;
+
+    bool draw = false;
+    bool isInsufficientMaterial();
+
+    std::string getPositionKey() const;
+    void recordPosition();
+    bool isFivefoldRepetition() const;
+
+    bool connectionGameOver = false;
+    void setConnectionGameOver();
 
     bool promotionActive = false;
     int promoRow = -1, promoCol = -1;
@@ -110,6 +125,12 @@ public:
 
     bool hasFinishedPromotionMove() const;
     void clearPromotionFinishedFlag();
+
+    bool whitePerspective = true;
+    void setPerspective(bool white)
+    {
+        whitePerspective = white;
+    }
 
 private:
     void initializePieces();     // Initializes pieces on the board

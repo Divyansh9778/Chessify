@@ -9,6 +9,7 @@ find_package(Boost REQUIRED)
 
 add_executable(ChessifyServer
     server.cpp
+    RoomManager.cpp
     ../src/network/ProtocolUtils.cpp
 )
 

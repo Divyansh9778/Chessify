@@ -1,6 +1,8 @@
+#include <boost/asio.hpp>
 #include <boost/beast/core.hpp>
 #include <boost/beast/websocket.hpp>
 
+#include "RoomManager.h"
 #include "../src/network/ProtocolUtils.h"
 
 #include <iostream>
@@ -8,7 +10,6 @@
 #include <cstdlib>
 #include <thread>
 #include <mutex>
-#include <unordered_map>
 #include <memory>
 #include <random>
 
@@ -19,140 +20,32 @@ namespace net = boost::asio;
 using tcp = net::ip::tcp;
 
 // ============================================================
-// GAME ROOM
+// CLOSE PLAYER
 // ============================================================
 
-struct GameRoom
-{
-    std::string id;
-
+void closePlayer(
     std::shared_ptr<
-        websocket::stream<tcp::socket>
-    > white;
-
-    std::shared_ptr<
-        websocket::stream<tcp::socket>
-    > black;
-
-    // Protects white / black / started
-    std::mutex roomMutex;
-
-    // Protects writes to WebSocket streams
-    std::mutex writeMutex;
-
-    bool started = false;
-};
-
-// ============================================================
-// ROOM MANAGER
-// ============================================================
-
-class RoomManager
+    websocket::stream<tcp::socket>
+    > player)
 {
-private:
-    std::unordered_map<
-        std::string,
-        std::shared_ptr<GameRoom>
-    > rooms;
+    if (!player)
+        return;
 
-    std::mutex roomsMutex;
+    beast::error_code ec;
 
-    std::mt19937 rng{
-        std::random_device{}()
-    };
+    player->close(
+        websocket::close_code::normal,
+        ec
+    );
 
-    std::string generateRoomId()
+    if (ec)
     {
-        static const char chars[] =
-            "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-
-        std::uniform_int_distribution<int> dist(
-            0,
-            sizeof(chars) - 2
-        );
-
-        std::string id;
-
-        do
-        {
-            id.clear();
-
-            for (int i = 0; i < 6; ++i)
-                id += chars[dist(rng)];
-
-        } while (rooms.find(id) != rooms.end());
-
-        return id;
-    }
-
-public:
-
-    std::shared_ptr<GameRoom> createRoom(
-        std::shared_ptr<
-        websocket::stream<tcp::socket>
-        > client)
-    {
-        std::lock_guard<std::mutex>
-            lock(roomsMutex);
-
-        auto room =
-            std::make_shared<GameRoom>();
-
-        room->id = generateRoomId();
-
-        room->white = client;
-
-        rooms[room->id] = room;
-
         std::cerr
-            << "[ROOM] Created "
-            << room->id
+            << "[SERVER] Error closing player: "
+            << ec.message()
             << '\n';
-
-        return room;
     }
-
-    std::shared_ptr<GameRoom> findRoom(
-        const std::string& id)
-    {
-        std::lock_guard<std::mutex>
-            lock(roomsMutex);
-
-        auto it = rooms.find(id);
-
-        if (it == rooms.end())
-            return nullptr;
-
-        return it->second;
-    }
-
-    void removeRoom(
-        const std::string& id)
-    {
-        std::lock_guard<std::mutex>
-            lock(roomsMutex);
-
-        auto it = rooms.find(id);
-
-        if (it != rooms.end())
-        {
-            rooms.erase(it);
-
-            std::cerr
-                << "[ROOM] Removed "
-                << id
-                << '\n';
-        }
-    }
-
-    size_t roomCount()
-    {
-        std::lock_guard<std::mutex>
-            lock(roomsMutex);
-
-        return rooms.size();
-    }
-};
+}
 
 // ============================================================
 // FORWARD MESSAGES
@@ -160,12 +53,9 @@ public:
 
 void forwardMessages(
     std::shared_ptr<GameRoom> room,
-    std::shared_ptr<
-    websocket::stream<tcp::socket>
-    > from,
-    std::shared_ptr<
-    websocket::stream<tcp::socket>
-    > to,
+    std::shared_ptr<websocket::stream<tcp::socket>> from,
+    std::shared_ptr<websocket::stream<tcp::socket>> to,
+    Turn playerTurn,
     const char* playerName)
 {
     try
@@ -190,9 +80,60 @@ void forwardMessages(
                 << msg
                 << '\n';
 
-            // ------------------------------------------------
-            // Send to opponent
-            // ------------------------------------------------
+
+            // =================================================
+            // PARSE PACKET
+            // =================================================
+
+            NetworkPacket packet =
+                parsePacket(msg);
+
+            if (packet.type != MessageType::Move)
+            {
+                std::cerr
+                    << "[ROOM "
+                    << room->id
+                    << "] Ignoring non-MOVE packet from "
+                    << playerName
+                    << '\n';
+
+                continue;
+            }
+
+
+            // =================================================
+            // SERVER-AUTHORITATIVE TURN CHECK
+            // =================================================
+
+            {
+                std::lock_guard<std::mutex>
+                    lock(room->roomMutex);
+
+                if (room->currentTurn != playerTurn)
+                {
+                    std::cerr
+                        << "[ROOM "
+                        << room->id
+                        << "] REJECTED "
+                        << playerName
+                        << " move: not their turn\n";
+
+                    continue;
+                }
+
+                // Switch turn only after accepting
+                // the move from the correct player.
+
+                room->currentTurn =
+                    (room->currentTurn == Turn::White)
+                    ? Turn::Black
+                    : Turn::White;
+            }
+
+
+            // =================================================
+            // FORWARD MOVE ONLY TO OPPONENT
+            // =================================================
 
             {
                 std::lock_guard<std::mutex>
@@ -221,6 +162,35 @@ void forwardMessages(
             << " disconnected: "
             << e.what()
             << '\n';
+
+        try
+        {
+            std::lock_guard<std::mutex>
+                lock(room->writeMutex);
+
+            if (to)
+            {
+                to->write(
+                    net::buffer(
+                        makePacket(
+                            MessageType::Disconnect,
+                            ""
+                        )
+                    )
+                );
+            }
+        }
+        catch (const std::exception& sendError)
+        {
+            std::cerr
+                << "[ROOM "
+                << room->id
+                << "] Could not notify opponent: "
+                << sendError.what()
+                << '\n';
+        }
+
+        closePlayer(to);
     }
     catch (const std::exception& e)
     {
@@ -232,39 +202,112 @@ void forwardMessages(
             << " error: "
             << e.what()
             << '\n';
+
+        try
+        {
+            std::lock_guard<std::mutex>
+                lock(room->writeMutex);
+
+            if (to)
+            {
+                to->write(
+                    net::buffer(
+                        makePacket(
+                            MessageType::Disconnect,
+                            ""
+                        )
+                    )
+                );
+            }
+        }
+        catch (const std::exception& sendError)
+        {
+            std::cerr
+                << "[ROOM "
+                << room->id
+                << "] Could not notify opponent: "
+                << sendError.what()
+                << '\n';
+        }
+
+        closePlayer(to);
     }
 }
+
 
 // ============================================================
 // START GAME
 // ============================================================
 
 void runGameRoom(
-    std::shared_ptr<GameRoom> room)
+    std::shared_ptr<GameRoom> room,
+    RoomManager& roomManager)
 {
     {
         std::lock_guard<std::mutex>
             lock(room->roomMutex);
 
+        // Game already started
         if (room->started)
             return;
 
+        // Need two players
         if (!room->white ||
             !room->black)
         {
             return;
         }
 
+        // ==================================================
+        // RANDOMLY ASSIGN COLORS
+        // ==================================================
+
+        static thread_local std::mt19937 colorRng{
+            std::random_device{}()
+        };
+
+        std::uniform_int_distribution<int>
+            colorDist(0, 1);
+
+        if (colorDist(colorRng) == 1)
+        {
+            // Swap the actual players.
+            // The previous white player becomes black,
+            // and the previous black player becomes white.
+            std::swap(
+                room->white,
+                room->black
+            );
+
+            std::cerr
+                << "[ROOM "
+                << room->id
+                << "] Random colors: "
+                << "Player 1 = BLACK, "
+                << "Player 2 = WHITE\n";
+        }
+        else
+        {
+            std::cerr
+                << "[ROOM "
+                << room->id
+                << "] Random colors: "
+                << "Player 1 = WHITE, "
+                << "Player 2 = BLACK\n";
+        }
+
         room->started = true;
     }
+
 
     std::cerr
         << "[ROOM "
         << room->id
         << "] Game Started!\n";
 
+
     // ========================================================
-    // ASSIGN COLORS
+    // SEND COLORS
     // ========================================================
 
     {
@@ -295,6 +338,7 @@ void runGameRoom(
         << room->id
         << "] Assigned colors\n";
 
+
     // ========================================================
     // TWO-WAY COMMUNICATION
     // ========================================================
@@ -304,6 +348,7 @@ void runGameRoom(
         room,
         room->white,
         room->black,
+        Turn::White,
         "WHITE"
     );
 
@@ -312,16 +357,29 @@ void runGameRoom(
         room,
         room->black,
         room->white,
+        Turn::Black,
         "BLACK"
     );
 
+
+    // Wait for both players
     whiteThread.join();
     blackThread.join();
+
 
     std::cerr
         << "[ROOM "
         << room->id
         << "] Game ended\n";
+
+
+    // ========================================================
+    // REMOVE ROOM
+    // ========================================================
+
+    roomManager.removeRoom(
+        room->id
+    );
 }
 
 // ============================================================
@@ -338,6 +396,7 @@ void handleClient(
     {
         std::cerr
             << "[SERVER] WebSocket client ready\n";
+
 
         // ====================================================
         // FIRST MESSAGE
@@ -357,8 +416,10 @@ void handleClient(
             << msg
             << '\n';
 
+
         NetworkPacket packet =
             parsePacket(msg);
+
 
         // ====================================================
         // CREATE ROOM
@@ -368,7 +429,9 @@ void handleClient(
             MessageType::CreateRoom)
         {
             auto room =
-                roomManager.createRoom(client);
+                roomManager.createRoom(
+                    client
+                );
 
             client->write(
                 net::buffer(
@@ -384,19 +447,24 @@ void handleClient(
                 << room->id
                 << "] Player 1 waiting\n";
 
-            // ------------------------------------------------
-            // IMPORTANT:
-            //
-            // We DO NOT wait here.
-            //
-            // handleClient() returns.
-            //
-            // The main accept loop can immediately accept
-            // another client.
-            // ------------------------------------------------
+            /*
+                IMPORTANT:
+
+                We return here.
+
+                The room stays alive inside
+                RoomManager's unordered_map.
+
+                The server immediately goes back
+                to accepting other clients.
+
+                Therefore multiple rooms can exist
+                simultaneously.
+            */
 
             return;
         }
+
 
         // ====================================================
         // JOIN ROOM
@@ -408,11 +476,15 @@ void handleClient(
             std::string roomId =
                 packet.payload;
 
-            auto room =
-                roomManager.findRoom(roomId);
 
             // ------------------------------------------------
-            // Room doesn't exist
+            // FIND ROOM
+            // ------------------------------------------------
+
+            auto room = roomManager.findRoom(roomId);
+
+            // ------------------------------------------------
+            // ROOM DOES NOT EXIST
             // ------------------------------------------------
 
             if (!room)
@@ -440,19 +512,20 @@ void handleClient(
             bool startGame = false;
 
             // ------------------------------------------------
-            // Add player to room
+            // ADD PLAYER TO ROOM
             // ------------------------------------------------
 
             {
                 std::lock_guard<std::mutex>
                     lock(room->roomMutex);
 
+                // Room already has two players
                 if (room->black)
                 {
                     std::cerr
                         << "[ROOM "
                         << room->id
-                        << "] Room full\n";
+                        << "] Room occupied - rejecting player\n";
 
                     client->write(
                         net::buffer(
@@ -469,43 +542,92 @@ void handleClient(
                     return;
                 }
 
+                // Add second player
                 room->black = client;
+
+                // =================================================
+                // RANDOM COLOR ASSIGNMENT
+                // =================================================
+
+                static thread_local
+                    std::mt19937 colorRng{
+                        std::random_device{}()
+                };
+
+                std::uniform_int_distribution<int>
+                    colorDist(0, 1);
+
+                if (colorDist(colorRng) == 1)
+                {
+                    std::swap(
+                        room->white,
+                        room->black
+                    );
+
+                    std::cerr
+                        << "[ROOM "
+                        << room->id
+                        << "] Random colors: "
+                        << "Player 1 = BLACK, "
+                        << "Player 2 = WHITE\n";
+                }
+                else
+                {
+                    std::cerr
+                        << "[ROOM "
+                        << room->id
+                        << "] Random colors: "
+                        << "Player 1 = WHITE, "
+                        << "Player 2 = BLACK\n";
+                }
+
 
                 startGame = true;
             }
 
+
             // ------------------------------------------------
-            // Tell Player 2 they joined
+            // TELL PLAYER 2 THEY JOINED
             // ------------------------------------------------
 
-            client->write(
-                net::buffer(
-                    makePacket(
-                        MessageType::RoomJoined,
-                        room->id
+            {
+                std::lock_guard<std::mutex>
+                    lock(room->writeMutex);
+
+                client->write(
+                    net::buffer(
+                        makePacket(
+                            MessageType::RoomJoined,
+                            room->id
+                        )
                     )
-                )
-            );
+                );
+            }
+
 
             std::cerr
                 << "[ROOM "
                 << room->id
                 << "] Player 2 joined\n";
 
+
             // ------------------------------------------------
-            // Start game
+            // START GAME
             // ------------------------------------------------
 
             if (startGame)
             {
                 std::thread(
                     runGameRoom,
-                    room
+                    room,
+                    std::ref(roomManager)
                 ).detach();
             }
 
+
             return;
         }
+
 
         // ====================================================
         // INVALID INITIAL MESSAGE
@@ -514,6 +636,7 @@ void handleClient(
         std::cerr
             << "[SERVER] Invalid initial packet\n";
 
+
         client->write(
             net::buffer(
                 makePacket(
@@ -521,6 +644,7 @@ void handleClient(
                 )
             )
         );
+
 
         client->close(
             websocket::close_code::protocol_error
@@ -542,6 +666,7 @@ void handleClient(
     }
 }
 
+
 // ============================================================
 // MAIN
 // ============================================================
@@ -551,9 +676,11 @@ int main()
     std::cerr
         << "[SERVER] Starting...\n";
 
+
     try
     {
         net::io_context io;
+
 
         // ====================================================
         // RAILWAY PORT
@@ -566,6 +693,7 @@ int main()
             portEnv
             ? std::stoi(portEnv)
             : 9002;
+
 
         // ====================================================
         // ACCEPTOR
@@ -581,12 +709,19 @@ int main()
             )
         );
 
+
         std::cerr
             << "[SERVER] Listening on port "
             << PORT
             << '\n';
 
+
+        // ====================================================
+        // ONE ROOM MANAGER FOR ENTIRE SERVER
+        // ====================================================
+
         RoomManager roomManager;
+
 
         // ====================================================
         // CONTINUOUS ACCEPT LOOP
@@ -599,31 +734,39 @@ int main()
                 std::cerr
                     << "[SERVER] Waiting for client...\n";
 
+
                 tcp::socket socket(io);
 
+
                 acceptor.accept(socket);
+
 
                 std::cerr
                     << "[SERVER] TCP client connected\n";
 
+
+                // =================================================
+                // KEEP YOUR EXISTING WEBSOCKET TYPE
+                // =================================================
+
                 auto client =
                     std::make_shared<
-                    websocket::stream<tcp::socket>
+                    websocket::stream<
+                    tcp::socket
+                    >
                     >(std::move(socket));
 
+
                 client->accept();
+
 
                 std::cerr
                     << "[SERVER] WebSocket handshake complete\n";
 
-                // ------------------------------------------------
-                // IMPORTANT:
-                //
-                // Handle this client in its own thread.
-                //
-                // The main server thread immediately goes back
-                // to accept().
-                // ------------------------------------------------
+
+                // =================================================
+                // HANDLE CLIENT IN ITS OWN THREAD
+                // =================================================
 
                 std::thread(
                     handleClient,
@@ -649,6 +792,7 @@ int main()
 
         return 1;
     }
+
 
     return 0;
 }

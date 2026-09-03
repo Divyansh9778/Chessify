@@ -17,7 +17,7 @@ public:
                   int mouseY,
                   char promotion = 0);
 
-    void applyRemoteMove(const MoveMessage& move);
+    bool applyRemoteMove(const MoveMessage& move);
 
 private:
     Board &board;

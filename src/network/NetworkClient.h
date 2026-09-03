@@ -47,10 +47,17 @@ public:
 
     bool isReady() const;
 
+    bool roomFull = false;
+    bool roomJoined = false;
+
+    bool consumeRoomFull();
+    bool consumeRoomJoined();
+
     void startListening();
 
     PlayerColor getPlayerColor() const;
     bool isMyTurn() const;
+    void setMyTurn(bool turn);
 
     bool hasDisconnected() const;
     void clearDisconnectFlag();

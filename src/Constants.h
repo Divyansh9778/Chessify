@@ -22,4 +22,31 @@ constexpr int BOARD_WIDTH = BOARD_SIZE * SQUARE_SIZE;
 constexpr int SCREEN_WIDTH = BOARD_WIDTH + 2 * BORDER_WIDTH_X;
 constexpr int SCREEN_HEIGHT = BOARD_WIDTH + 2 * BORDER_WIDTH_Y;
 
+const float MENU_PANEL_W = 420.0f;
+const float MENU_PANEL_H = 450.0f;
+
+const float MENU_PANEL_X = 2 * BORDER_WIDTH_X + BOARD_SIZE * SQUARE_SIZE;
+const float MENU_PX = MENU_PANEL_X + (PANEL_WIDTH - MENU_PANEL_W) / 2;
+const float MENU_PY = (SCREEN_HEIGHT - MENU_PANEL_H) / 2;
+
+const float MENU_BUTTON_X = MENU_PX + 60;
+const float MENU_BUTTON_W = 300;
+const float MENU_BUTTON_H = 50;
+
+const float MENU_Y1 = MENU_PY + 120;
+const float MENU_Y2 = MENU_PY + 190;
+const float MENU_Y3 = MENU_PY + 280;
+
+const float MENU_SMALL_X = MENU_PX + 145;
+const float MENU_SMALL_W = 130;
+const float MENU_SMALL_H = 40;
+const float MENU_BACK_Y = MENU_PY + 370;
+
+enum class PlayerColorChoice
+{
+    BLACK,
+    RANDOM,
+    WHITE
+};
+
 #endif // CONSTANTS_H

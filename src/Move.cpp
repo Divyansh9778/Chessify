@@ -251,27 +251,33 @@ bool Move::isValidMove(Piece* piece, int newRow, int newCol, int oldRow, int old
 
 bool Board::isKingInCheck(bool isWhite, Piece* board[BOARD_SIZE][BOARD_SIZE])
 {
-    int kingRow = -1, kingCol = -1;
+    int kingRow = -1;
+    int kingCol = -1;
 
-    // Find the king's position
     for (int r = 0; r < BOARD_SIZE; r++)
     {
         for (int c = 0; c < BOARD_SIZE; c++)
         {
             Piece* piece = board[r][c];
-            if (piece && piece->isWhite == isWhite && piece->type == (isWhite ? "wk" : "bk"))
+
+            if (piece &&
+                piece->isWhite == isWhite &&
+                piece->type == (isWhite ? "wk" : "bk"))
             {
                 kingRow = r;
                 kingCol = c;
                 break;
             }
         }
+
         if (kingRow != -1)
             break;
     }
 
-    bool attacked = Move::isSquareAttacked(kingRow, kingCol, !isWhite, board);
-    return attacked;
+    if (kingRow == -1 || kingCol == -1)
+        return false;
+
+    return Move::isSquareAttacked(kingRow, kingCol, !isWhite, board);
 }
 
 bool Move::isSquareAttacked(int row, int col, bool byWhite, Piece* board[BOARD_SIZE][BOARD_SIZE])
@@ -429,23 +435,84 @@ bool Move::canCastle(Piece* king, int newRow, int newCol, Piece* board[BOARD_SIZ
     return true;
 }
 
-bool Move::leavesKingInCheck(Piece* piece, int newRow, int newCol, int oldRow, int oldCol, Piece* board[BOARD_SIZE][BOARD_SIZE])
+bool Move::leavesKingInCheck(
+    Piece* piece,
+    int newRow,
+    int newCol,
+    int oldRow,
+    int oldCol,
+    Piece* board[BOARD_SIZE][BOARD_SIZE])
 {
-    Piece* temp = board[newRow][newCol];
+    if (!piece)
+        return true;
 
+    Piece* destination = board[newRow][newCol];
+
+    // -------------------------------------------------
+    // En-passant
+    // -------------------------------------------------
+    bool isEnPassant =
+        (piece->type == "wp" || piece->type == "bp") &&
+        oldCol != newCol &&
+        destination == nullptr;
+
+    Piece* enPassantCaptured = nullptr;
+    int capturedRow = -1;
+
+    if (isEnPassant)
+    {
+        capturedRow =
+            piece->isWhite
+            ? newRow + 1
+            : newRow - 1;
+
+        if (capturedRow >= 0 &&
+            capturedRow < BOARD_SIZE)
+        {
+            enPassantCaptured = board[capturedRow][newCol];
+
+            board[capturedRow][newCol] = nullptr;
+        }
+    }
+
+    // -------------------------------------------------
+    // Save original position
+    // -------------------------------------------------
+    int oldX = piece->xPos;
+    int oldY = piece->yPos;
+
+    // -------------------------------------------------
+    // Temporarily execute move
+    // -------------------------------------------------
     board[oldRow][oldCol] = nullptr;
     board[newRow][newCol] = piece;
 
-    int oldX = piece->xPos, oldY = piece->yPos;
     piece->xPos = newCol * SQUARE_SIZE;
     piece->yPos = newRow * SQUARE_SIZE;
 
-    bool stillInCheck = Board::isKingInCheck(piece->isWhite, board);
+    // -------------------------------------------------
+    // Test king safety
+    // -------------------------------------------------
+    bool leavesCheck =
+        Board::isKingInCheck(
+            piece->isWhite,
+            board);
 
+    // -------------------------------------------------
+    // ALWAYS restore original state
+    // -------------------------------------------------
     board[oldRow][oldCol] = piece;
-    board[newRow][newCol] = temp;
+    board[newRow][newCol] = destination;
+
     piece->xPos = oldX;
     piece->yPos = oldY;
 
-    return stillInCheck;
+    // Restore en-passant victim
+    if (isEnPassant)
+    {
+        board[capturedRow][newCol] =
+            enPassantCaptured;
+    }
+
+    return leavesCheck;
 }

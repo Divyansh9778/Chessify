@@ -31,6 +31,7 @@
 #include <process.h>
 #include <cmath>
 #include <algorithm>
+#include <cctype>
 
 #include "network/ProtocolUtils.h"
 #include "network/NetworkPacket.h"
@@ -41,7 +42,10 @@ enum class UIState
     CONNECTING,
     PLAYING,
     EXIT_CONFIRM,
-    CONNECTION_LOST
+    CONNECTION_LOST,
+    CREATE_ROOM,
+    JOIN_ROOM,
+    WAITING_ROOM
 };
 
 UIState prevState = UIState::START_MENU;
@@ -122,14 +126,15 @@ static bool init(SDL_Window *&window, SDL_Renderer *&renderer, TTF_Font *&font, 
     return true;
 }
 
-static void drawNumbers(SDL_Renderer *renderer, TTF_Font *font)
+static void drawNumbers(SDL_Renderer *renderer, TTF_Font *font, bool whitePerspective)
 {
     // Set the color for the numbers (white)
     SDL_Color textColor = {255, 255, 255, 255};
 
     for (int i = 0; i < BOARD_SIZE; i++)
     {
-        std::string text = std::to_string(8 - i);
+        int boardRow = whitePerspective ? i : BOARD_SIZE - 1 - i;
+        std::string text = std::to_string(8 - boardRow);
 
         // Create a surface with the number as text
         SDL_Surface *textSurface = TTF_RenderText_Blended(font, text.c_str(), text.length(), textColor);
@@ -158,14 +163,14 @@ static void drawNumbers(SDL_Renderer *renderer, TTF_Font *font)
     }
 }
 
-static void drawLetters(SDL_Renderer *renderer, TTF_Font *font)
+static void drawLetters(SDL_Renderer *renderer, TTF_Font *font, bool whitePerspective)
 {
     SDL_Color textColor = {255, 255, 255, 255}; // White color for text
 
     // Loop through letters 'A' to 'H'
     for (int i = 0; i < BOARD_SIZE; i++)
     {
-        char letter = 'a' + i;            // Generate the letter (a, b, c, ..., h)
+        char letter = whitePerspective ? ('a' + i) : ('h' - i);
         std::string letterStr(1, letter); // Convert the letter to a string
 
         // Render the letter with smoother anti-aliasing
@@ -324,7 +329,7 @@ static void DrawBox(SDL_Renderer *r, float x, float y, float w, float h, SDL_Col
     SDL_RenderFillRect(r, &rect);
 }
 
-static GameSettings ShowStartScreen(SDL_Renderer *r, TTF_Font *font, Board &board)
+static GameSettings ShowStartScreen(SDL_Renderer* r, TTF_Font* font, Board& board)
 {
     GameSettings gs;
     SDL_Event e;
@@ -332,19 +337,31 @@ static GameSettings ShowStartScreen(SDL_Renderer *r, TTF_Font *font, Board &boar
     int depth = 1200;
     bool pickingDepth = false;
 
-    const float PW = 420, PH = 360;
+    int mx = 0;
+    int my = 0;
 
-    // start of right gray area (same as MovePanel)
-    float rightPanelX = 2 * BORDER_WIDTH_X + BOARD_SIZE * SQUARE_SIZE;
+    const int colorButtonW = 95;
+    const int colorButtonH = 70;
+    const int colorGap = 8;
 
-    // width of that gray area
-    float rightPanelWidth = PANEL_WIDTH;
+    const int colorY = MENU_Y1;
 
-    // center inside the gray panel
-    const float PX = rightPanelX + (rightPanelWidth - PW) / 2;
-    const float PY = (SCREEN_HEIGHT - PH) / 2;
+    const int totalColorWidth =
+        colorButtonW * 3 + colorGap * 2;
 
-    int mx = 0, my = 0;
+    const int colorStartX =
+        MENU_BUTTON_X +
+        (MENU_BUTTON_W - totalColorWidth) / 2;
+
+    const int blackX = colorStartX;
+    const int randomX =
+        blackX + colorButtonW + colorGap;
+    const int whiteX =
+        randomX + colorButtonW + colorGap;
+
+    PlayerColorChoice playerColor =
+        PlayerColorChoice::RANDOM;
+
     while (true)
     {
         SDL_SetRenderDrawColor(r, 0, 0, 0, 255);
@@ -356,40 +373,170 @@ static GameSettings ShowStartScreen(SDL_Renderer *r, TTF_Font *font, Board &boar
                 exit(0);
 
             if (e.type == SDL_EVENT_MOUSE_MOTION)
-                mx = (int)e.motion.x;
-            my = (int)e.motion.y;
+            {
+                mx = static_cast<int>(e.motion.x);
+                my = static_cast<int>(e.motion.y);
+            }
 
             if (e.type == SDL_EVENT_MOUSE_BUTTON_DOWN)
             {
-                // Quit button
-                if (Hover(mx, my, PX + 145, PY + 300, 130, 40))
-                    exit(0);
+                // ==================================================
+                // MAIN MENU
+                // ==================================================
 
                 if (!pickingDepth)
                 {
-                    // Vs Human
-                    if (Hover(mx, my, PX + 60, PY + 120, 300, 50))
+                    // Create Room
+                    if (Hover(mx, my,
+                        MENU_BUTTON_X,
+                        MENU_Y1,
+                        MENU_BUTTON_W,
+                        MENU_BUTTON_H))
                     {
                         gs.vsEngine = false;
+                        currState = UIState::CREATE_ROOM;
                         return gs;
                     }
-                    // Vs Stockfish
-                    if (Hover(mx, my, PX + 60, PY + 190, 300, 50))
+
+                    // Join Room
+                    if (Hover(mx, my,
+                        MENU_BUTTON_X,
+                        MENU_Y2,
+                        MENU_BUTTON_W,
+                        MENU_BUTTON_H))
+                    {
+                        gs.vsEngine = false;
+                        currState = UIState::JOIN_ROOM;
+                        return gs;
+                    }
+
+                    // Stockfish
+                    if (Hover(mx, my,
+                        MENU_BUTTON_X,
+                        MENU_Y3,
+                        MENU_BUTTON_W,
+                        MENU_BUTTON_H))
                     {
                         pickingDepth = true;
                     }
+
+                    // Quit
+                    if (Hover(mx, my,
+                        MENU_SMALL_X,
+                        MENU_BACK_Y,
+                        MENU_SMALL_W,
+                        MENU_SMALL_H))
+                    {
+                        exit(0);
+                    }
                 }
+
+                // ==================================================
+                // STOCKFISH SCREEN
+                // ==================================================
+
                 else
                 {
-                    // OK
-                    if (Hover(mx, my, PX + 145, PY + 240, 130, 40))
+                    // Black
+                    if (Hover(
+                        mx,
+                        my,
+                        blackX,
+                        colorY,
+                        colorButtonW,
+                        colorButtonH))
+                    {
+                        playerColor =
+                            PlayerColorChoice::BLACK;
+
+                        std::cout
+                            << "[UI] Selected BLACK\n";
+                    }
+
+                    // Random
+                    else if (Hover(
+                        mx,
+                        my,
+                        randomX,
+                        colorY,
+                        colorButtonW,
+                        colorButtonH))
+                    {
+                        playerColor =
+                            PlayerColorChoice::RANDOM;
+
+                        std::cout
+                            << "[UI] Selected RANDOM\n";
+                    }
+
+                    // White
+                    else if (Hover(
+                        mx,
+                        my,
+                        whiteX,
+                        colorY,
+                        colorButtonW,
+                        colorButtonH))
+                    {
+                        playerColor =
+                            PlayerColorChoice::WHITE;
+
+                        std::cout
+                            << "[UI] Selected WHITE\n";
+                    }
+
+
+                    // Start
+                    if (Hover(mx, my,
+                        MENU_BUTTON_X,
+                        MENU_Y3,
+                        MENU_BUTTON_W,
+                        MENU_BUTTON_H))
                     {
                         gs.vsEngine = true;
-                        gs.engineDepth = static_cast<int>(1.05 * depth + 300);
+
+                        gs.engineDepth =
+                            static_cast<int>(1.05 * depth + 300);
+
+                        // Resolve RANDOM here
+                        if (playerColor == PlayerColorChoice::RANDOM)
+                        {
+                            gs.playerColor = (rand() % 2 == 0) ? PlayerColorChoice::WHITE : PlayerColorChoice::BLACK;
+							playerColor = gs.playerColor; // Update the playerColor variable to reflect the resolved color
+                        }
+                        else
+                            gs.playerColor = playerColor;
+
+                        if (gs.playerColor == PlayerColorChoice::WHITE)
+                            board.setPerspective(true);
+                        else if (gs.playerColor == PlayerColorChoice::BLACK)
+                            board.setPerspective(false);
+
+                        std::cout
+                            << "[Stockfish] Player color = "
+                            << (gs.playerColor == PlayerColorChoice::WHITE
+                                ? "WHITE"
+                                : "BLACK")
+                            << '\n';
+
                         return gs;
+                    }
+
+                    // BACK
+                    if (Hover(mx, my,
+                        MENU_SMALL_X,
+                        MENU_BACK_Y,
+                        MENU_SMALL_W,
+                        MENU_SMALL_H))
+                    {
+                        pickingDepth = false;
                     }
                 }
             }
+
+            // ==================================================
+            // KEYBOARD
+            // ==================================================
 
             if (e.type == SDL_EVENT_KEY_DOWN)
             {
@@ -398,78 +545,1444 @@ static GameSettings ShowStartScreen(SDL_Renderer *r, TTF_Font *font, Board &boar
                     if (e.key.key == SDLK_LEFT)
                     {
                         depth -= 50;
-                        depth = std::max(1000, std::min(depth, 2500));
+
+                        depth = std::max(
+                            1000,
+                            std::min(depth, 2500));
                     }
                     else if (e.key.key == SDLK_RIGHT)
                     {
                         depth += 50;
-                        depth = std::max(1000, std::min(depth, 2500));
+
+                        depth = std::max(
+                            1000,
+                            std::min(depth, 2500));
                     }
                     else if (e.key.key == SDLK_RETURN)
                     {
                         gs.vsEngine = true;
-                        gs.engineDepth = static_cast<int>(1.05 * depth + 300);
+
+                        gs.engineDepth =
+                            static_cast<int>(1.05 * depth + 300);
+
+                        // Resolve RANDOM here
+                        if (playerColor == PlayerColorChoice::RANDOM)
+                        {
+                            gs.playerColor =
+                                (rand() % 2 == 0)
+                                ? PlayerColorChoice::WHITE
+                                : PlayerColorChoice::BLACK;
+							playerColor = gs.playerColor; // Update the playerColor variable to reflect the resolved color
+                        }
+                        else
+                            gs.playerColor = playerColor;
+
+                        if (gs.playerColor == PlayerColorChoice::WHITE)
+                            board.setPerspective(true);
+                        else if (gs.playerColor == PlayerColorChoice::BLACK)
+                            board.setPerspective(false);
+
+                        std::cout
+                            << "[Stockfish] Player color = "
+                            << (gs.playerColor == PlayerColorChoice::WHITE
+                                ? "WHITE"
+                                : "BLACK"
+                                )
+                            << '\n';
+
                         return gs;
                     }
                     else if (e.key.key == SDLK_ESCAPE)
+                    {
                         pickingDepth = false;
+                    }
                 }
             }
         }
 
-        // Draw board first (for transparent background)
+        // ==================================================
+        // BACKGROUND
+        // ==================================================
+
         board.drawBoard(r, font);
 
         SDL_SetRenderDrawColor(r, 28, 28, 28, 255);
 
         SDL_FRect panelBG = {
-            2 * BORDER_WIDTH_X + BOARD_SIZE * SQUARE_SIZE,
+            MENU_PANEL_X,
             0,
-            1920 - (2 * BORDER_WIDTH_X + BOARD_SIZE * SQUARE_SIZE) - BOARD_OFFSET_X,
-            1080};
+            PANEL_WIDTH,
+            SCREEN_HEIGHT
+        };
 
         SDL_RenderFillRect(r, &panelBG);
 
-        drawNumbers(r, font);
-        drawLetters(r, font);
+        drawNumbers(r, font, board.whitePerspective);
+        drawLetters(r, font, board.whitePerspective);
 
-        // Overlay
         DrawOverlay(r);
 
-        SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
+        // ==================================================
+        // MAIN PANEL
+        // ==================================================
 
-        // Panel with shadow
-        DrawShadow(r, PX, PY, PW, PH);
-        DrawRounded(r, PX, PY, PW, PH, 12, {40, 40, 40, 230});
+        DrawShadow(
+            r,
+            MENU_PX,
+            MENU_PY,
+            MENU_PANEL_W,
+            MENU_PANEL_H);
 
-        DrawTextCentered(r, font, "Chessify", PX, PY + 20, PW, 50, {255, 255, 255, 255});
+        DrawRounded(
+            r,
+            MENU_PX,
+            MENU_PY,
+            MENU_PANEL_W,
+            MENU_PANEL_H,
+            12,
+            { 40, 40, 40, 230 });
+
+        // ==================================================
+        // MAIN MENU
+        // ==================================================
 
         if (!pickingDepth)
         {
-            FancyButton(r, mx, my, PX + 60, PY + 120, 300, 50, "v/s Human", font);
-            FancyButton(r, mx, my, PX + 60, PY + 190, 300, 50, "v/s Stockfish", font);
+            DrawTextCentered(
+                r,
+                font,
+                "Chessify",
+                MENU_PX,
+                MENU_PY + 20,
+                MENU_PANEL_W,
+                50,
+                COLOR_TEXT);
+
+            // Create Room
+            FancyButton(
+                r, mx, my,
+                MENU_BUTTON_X,
+                MENU_Y1,
+                MENU_BUTTON_W,
+                MENU_BUTTON_H,
+                "Create Room",
+                font);
+
+            // Join Room
+            FancyButton(
+                r, mx, my,
+                MENU_BUTTON_X,
+                MENU_Y2,
+                MENU_BUTTON_W,
+                MENU_BUTTON_H,
+                "Join Room",
+                font);
+
+            // Stockfish
+            FancyButton(
+                r, mx, my,
+                MENU_BUTTON_X,
+                MENU_Y3,
+                MENU_BUTTON_W,
+                MENU_BUTTON_H,
+                "v/s Stockfish",
+                font);
+
+            // Quit
+            DrawRounded(
+                r,
+                MENU_SMALL_X,
+                MENU_BACK_Y,
+                MENU_SMALL_W,
+                MENU_SMALL_H,
+                10,
+                { 200, 60, 60, 255 });
+
+            DrawTextCentered(
+                r,
+                font,
+                "Quit",
+                MENU_SMALL_X,
+                MENU_BACK_Y,
+                MENU_SMALL_W,
+                MENU_SMALL_H,
+                COLOR_TEXT);
+        }
+
+        else
+        {
+            // ==================================================
+            // STOCKFISH SCREEN
+            // ==================================================
+
+            // TITLE
+            DrawTextCentered(
+                r,
+                font,
+                "Play Stockfish",
+                MENU_PX,
+                MENU_PY + 20,
+                MENU_PANEL_W,
+                50,
+                COLOR_TEXT);
+
+            // ==================================================
+            // LOAD KING TEXTURES
+            // ==================================================
+
+            SDL_Texture* blackKing =
+                Board::pieceTextures["bk"];
+
+            SDL_Texture* whiteKing =
+                Board::pieceTextures["wk"];
+
+
+            // ==================================================
+            // BLACK
+            // ==================================================
+
+            DrawRounded(
+                r,
+                blackX,
+                colorY,
+                colorButtonW,
+                colorButtonH,
+                10,
+                playerColor == PlayerColorChoice::BLACK
+                ? SDL_Color{ 90, 90, 90, 255 }
+                : SDL_Color{ 60, 60, 60, 255 }
+            );
+
+            if (blackKing)
+            {
+                SDL_FRect dst = {
+                    static_cast<float>(blackX + 15),
+                    static_cast<float>(colorY + 5),
+                    static_cast<float>(colorButtonW - 30),
+                    static_cast<float>(colorButtonH - 10)
+                };
+
+                SDL_RenderTexture(
+                    r,
+                    blackKing,
+                    nullptr,
+                    &dst
+                );
+            }
+
+            // ==================================================
+            // RANDOM
+            // ==================================================
+
+            DrawRounded(
+                r,
+                randomX,
+                colorY,
+                colorButtonW,
+                colorButtonH,
+                10,
+                playerColor == PlayerColorChoice::RANDOM
+                ? SDL_Color{ 90, 90, 90, 255 }
+                : SDL_Color{ 60, 60, 60, 255 }
+            );
+
+            if (blackKing && whiteKing)
+            {
+                float blackW, blackH;
+                float whiteW, whiteH;
+
+                SDL_GetTextureSize(
+                    blackKing,
+                    &blackW,
+                    &blackH
+                );
+
+                SDL_GetTextureSize(
+                    whiteKing,
+                    &whiteW,
+                    &whiteH
+                );
+
+                // --------------------------------------------------
+                // BLACK LEFT HALF
+                // --------------------------------------------------
+
+                SDL_FRect blackSrc = {
+                    0.0f,
+                    0.0f,
+                    blackW / 2.0f,
+                    blackH
+                };
+
+                SDL_FRect blackDst = {
+                    static_cast<float>(randomX + 15),
+                    static_cast<float>(colorY + 5),
+                    static_cast<float>((colorButtonW - 30) / 2),
+                    static_cast<float>(colorButtonH - 10)
+                };
+
+                SDL_RenderTexture(
+                    r,
+                    blackKing,
+                    &blackSrc,
+                    &blackDst
+                );
+
+                // --------------------------------------------------
+                // WHITE RIGHT HALF
+                // --------------------------------------------------
+
+                SDL_FRect whiteSrc = {
+                    whiteW / 2.0f,
+                    0.0f,
+                    whiteW / 2.0f,
+                    whiteH
+                };
+
+                SDL_FRect whiteDst = {
+                    static_cast<float>(
+                        randomX + 15 +
+                        (colorButtonW - 30) / 2
+                    ),
+                    static_cast<float>(colorY + 5),
+                    static_cast<float>((colorButtonW - 30) / 2),
+                    static_cast<float>(colorButtonH - 10)
+                };
+
+                SDL_RenderTexture(
+                    r,
+                    whiteKing,
+                    &whiteSrc,
+                    &whiteDst
+                );
+            }
+
+            // ==================================================
+            // WHITE
+            // ==================================================
+
+            DrawRounded(
+                r,
+                whiteX,
+                colorY,
+                colorButtonW,
+                colorButtonH,
+                10,
+                playerColor == PlayerColorChoice::WHITE
+                ? SDL_Color{ 90, 90, 90, 255 }
+                : SDL_Color{ 60, 60, 60, 255 }
+            );
+
+            if (whiteKing)
+            {
+                SDL_FRect dst = {
+                    static_cast<float>(whiteX + 15),
+                    static_cast<float>(colorY + 5),
+                    static_cast<float>(colorButtonW - 30),
+                    static_cast<float>(colorButtonH - 10)
+                };
+
+                SDL_RenderTexture(
+                    r,
+                    whiteKing,
+                    nullptr,
+                    &dst
+                );
+            }
+
+
+            // ==================================================
+            // RATING
+            // ==================================================
+
+            DepthButton(
+                r,
+                mx,
+                my,
+                MENU_BUTTON_X,
+                MENU_Y2,
+                "-",
+                depth,
+                -50,
+                font
+            );
+
+            DrawTextCentered(
+                r,
+                font,
+                std::to_string(depth),
+                MENU_BUTTON_X + 55,
+                MENU_Y2,
+                MENU_BUTTON_W - 110,
+                MENU_BUTTON_H,
+                COLOR_TEXT
+            );
+
+            DepthButton(
+                r,
+                mx,
+                my,
+                MENU_BUTTON_X + MENU_BUTTON_W - 50,
+                MENU_Y2,
+                "+",
+                depth,
+                +50,
+                font
+            );
+
+
+            // ==================================================
+            // START
+            // ==================================================
+
+            FancyButton(
+                r,
+                mx,
+                my,
+                MENU_BUTTON_X,
+                MENU_Y3,
+                MENU_BUTTON_W,
+                MENU_BUTTON_H,
+                "Start",
+                font
+            );
+
+
+            // ==================================================
+            // BACK
+            // ==================================================
+
+            DrawRounded(
+                r,
+                MENU_SMALL_X,
+                MENU_BACK_Y,
+                MENU_SMALL_W,
+                MENU_SMALL_H,
+                10,
+                { 200, 60, 60, 255 }
+            );
+
+            DrawTextCentered(
+                r,
+                font,
+                "Back",
+                MENU_SMALL_X,
+                MENU_BACK_Y,
+                MENU_SMALL_W,
+                MENU_SMALL_H,
+                COLOR_TEXT
+            );
+        }
+
+        SDL_RenderPresent(r);
+        SDL_Delay(12);
+    }
+}
+
+static void ShowCreateRoomScreen(
+    SDL_Renderer* r,
+    TTF_Font* font,
+    Board& board,
+    NetworkClient& network)
+{
+    SDL_Event e;
+
+    int mx = 0;
+    int my = 0;
+
+    // ============================================================
+    // CREATE ROOM AUTOMATICALLY WHEN ENTERING THIS SCREEN
+    // ============================================================
+
+    std::cout << "[UI] Entered Create Room screen\n";
+
+    if (!network.isConnected())
+    {
+        std::cout
+            << "[Network] Connecting to server...\n";
+
+        if (!network.connect(
+            "chessify-production.up.railway.app",
+            443))
+        {
+            std::cout
+                << "[Network] Could not connect to server\n";
+
+            currState = UIState::START_MENU;
+            return;
+        }
+    }
+
+    std::cout
+        << "[Network] Creating room...\n";
+
+    if (!network.createRoom())
+    {
+        std::cout
+            << "[Network] Failed to create room\n";
+
+        currState = UIState::START_MENU;
+        return;
+    }
+
+    std::cout
+        << "[Network] Create room request sent\n";
+
+    // ============================================================
+    // SCREEN LOOP
+    // ============================================================
+
+    while (currState == UIState::CREATE_ROOM)
+    {
+        SDL_SetRenderDrawColor(
+            r,
+            0, 0, 0, 255);
+
+        SDL_RenderClear(r);
+
+        // ========================================================
+        // EVENTS
+        // ========================================================
+
+        while (SDL_PollEvent(&e))
+        {
+            if (e.type == SDL_EVENT_QUIT)
+                exit(0);
+
+            if (e.type == SDL_EVENT_MOUSE_MOTION)
+            {
+                mx = static_cast<int>(e.motion.x);
+                my = static_cast<int>(e.motion.y);
+            }
+
+            if (e.type == SDL_EVENT_MOUSE_BUTTON_DOWN)
+            {
+                // =================================================
+                // COPY CODE
+                // =================================================
+
+                if (Hover(
+                    mx, my,
+                    MENU_BUTTON_X,
+                    MENU_Y2,
+                    MENU_BUTTON_W,
+                    MENU_BUTTON_H))
+                {
+                    std::string roomCode =
+                        network.getRoomCode();
+
+                    if (!roomCode.empty())
+                    {
+                        SDL_SetClipboardText(
+                            roomCode.c_str());
+
+                        std::cout
+                            << "[UI] Room code copied: "
+                            << roomCode
+                            << '\n';
+                    }
+                    else
+                    {
+                        std::cout
+                            << "[UI] No room code yet\n";
+                    }
+                }
+
+                // =================================================
+                // CREATE ROOM TILE
+                //
+                // Room is already being created automatically.
+                // Therefore this does nothing.
+                // =================================================
+
+                else if (Hover(
+                    mx, my,
+                    MENU_BUTTON_X,
+                    MENU_Y3,
+                    MENU_BUTTON_W,
+                    MENU_BUTTON_H))
+                {
+                    std::cout
+                        << "[UI] Create Room tile clicked\n";
+
+                    currState = UIState::WAITING_ROOM;
+                    return;
+                }
+
+                // =================================================
+                // BACK
+                // =================================================
+
+                else if (Hover(
+                    mx, my,
+                    MENU_SMALL_X,
+                    MENU_BACK_Y,
+                    MENU_SMALL_W,
+                    MENU_SMALL_H))
+                {
+                    std::cout
+                        << "[UI] Back clicked\n";
+
+                    if (network.isConnected())
+                        network.disconnect();
+
+                    currState =
+                        UIState::START_MENU;
+
+                    return;
+                }
+            }
+
+            // ========================================================
+            // ESCAPE
+            // ========================================================
+
+            if (e.type == SDL_EVENT_KEY_DOWN)
+            {
+                if (e.key.key == SDLK_ESCAPE)
+                {
+                    if (network.isConnected())
+                        network.disconnect();
+
+                    currState =
+                        UIState::START_MENU;
+
+                    return;
+                }
+
+                if (e.key.key == SDLK_RETURN)
+                {
+                    std::cout << "[UI] Enter pressed - Create Room\n";
+
+                    if (!network.isConnected())
+                    {
+                        std::cout << "[Network] Connecting to server...\n";
+
+                        if (!network.connect(
+                            "chessify-production.up.railway.app",
+                            443))
+                        {
+                            std::cout << "[Network] Could not connect to server\n";
+                            continue;
+                        }
+                    }
+
+                    if (network.createRoom())
+                    {
+                        std::cout << "[Network] Create room request sent\n";
+
+                        currState = UIState::WAITING_ROOM;
+                        return;
+                    }
+                }
+            }
+        }
+
+        // ============================================================
+        // GET ROOM CODE
+        //
+        // NetworkClient receives ROOM_CREATED asynchronously.
+        // ============================================================
+
+        std::string roomCode =
+            network.getRoomCode();
+
+        // ============================================================
+        // BACKGROUND
+        // ============================================================
+
+        board.drawBoard(r, font);
+
+        SDL_SetRenderDrawColor(
+            r,
+            28, 28, 28, 255);
+
+        SDL_FRect panelBG = {
+            MENU_PANEL_X,
+            0,
+            PANEL_WIDTH,
+            SCREEN_HEIGHT
+        };
+
+        SDL_RenderFillRect(
+            r,
+            &panelBG);
+
+        drawNumbers(r, font, board.whitePerspective);
+        drawLetters(r, font, board.whitePerspective);
+
+        DrawOverlay(r);
+
+        // ============================================================
+        // PANEL
+        // ============================================================
+
+        DrawShadow(
+            r,
+            MENU_PX,
+            MENU_PY,
+            MENU_PANEL_W,
+            MENU_PANEL_H);
+
+        DrawRounded(
+            r,
+            MENU_PX,
+            MENU_PY,
+            MENU_PANEL_W,
+            MENU_PANEL_H,
+            12,
+            { 40, 40, 40, 230 });
+
+        DrawTextCentered(
+            r,
+            font,
+            "Create Room",
+            MENU_PX,
+            MENU_PY + 20,
+            MENU_PANEL_W,
+            50,
+            COLOR_TEXT);
+
+        // ============================================================
+        // ROOM CODE
+        // Same position as CREATE ROOM on main screen
+        // ============================================================
+
+        DrawRounded(
+            r,
+            MENU_BUTTON_X,
+            MENU_Y1,
+            MENU_BUTTON_W,
+            MENU_BUTTON_H,
+            10,
+            { 60, 60, 60, 255 });
+
+        if (roomCode.empty())
+        {
+            DrawTextCentered(
+                r,
+                font,
+                "Room Code",
+                MENU_BUTTON_X,
+                MENU_Y1,
+                MENU_BUTTON_W,
+                MENU_BUTTON_H,
+                { 150, 150, 150, 255 });
         }
         else
         {
-            DrawTextCentered(r, font, "Choose Rating", PX, PY + 90, PW, 40, COLOR_TEXT);
-
-            // Minus
-            DepthButton(r, mx, my, PX + 90, PY + 150, "-", depth, -50, font);
-
-            // Depth value
-            DrawTextCentered(r, font, std::to_string(depth),
-                             PX + 170, PY + 145, 80, 60, COLOR_TEXT);
-
-            // Plus
-            DepthButton(r, mx, my, PX + 270, PY + 150, "+", depth, +50, font);
-
-            // OK button
-            FancyButton(r, mx, my, PX + 145, PY + 240, 130, 40, "OK", font);
+            DrawTextCentered(
+                r,
+                font,
+                roomCode,
+                MENU_BUTTON_X,
+                MENU_Y1,
+                MENU_BUTTON_W,
+                MENU_BUTTON_H,
+                COLOR_TEXT);
         }
 
-        // Quit button
-        DrawRounded(r, PX + 145, PY + 300, 130, 40, 10, {200, 60, 60, 255});
-        DrawTextCentered(r, font, "QUIT", PX + 145, PY + 300, 130, 40, COLOR_TEXT);
+        // ============================================================
+        // COPY CODE
+        // Same position as JOIN ROOM
+        // ============================================================
+
+        FancyButton(
+            r,
+            mx,
+            my,
+            MENU_BUTTON_X,
+            MENU_Y2,
+            MENU_BUTTON_W,
+            MENU_BUTTON_H,
+            "Copy Code",
+            font);
+
+        // ============================================================
+        // CREATE ROOM
+        // Same position as STOCKFISH
+        // ============================================================
+
+        FancyButton(
+            r,
+            mx,
+            my,
+            MENU_BUTTON_X,
+            MENU_Y3,
+            MENU_BUTTON_W,
+            MENU_BUTTON_H,
+            "Create",
+            font);
+
+        // ============================================================
+        // BACK
+        // Same position as QUIT
+        // ============================================================
+
+        DrawRounded(
+            r,
+            MENU_SMALL_X,
+            MENU_BACK_Y,
+            MENU_SMALL_W,
+            MENU_SMALL_H,
+            10,
+            { 200, 60, 60, 255 });
+
+        DrawTextCentered(
+            r,
+            font,
+            "Back",
+            MENU_SMALL_X,
+            MENU_BACK_Y,
+            MENU_SMALL_W,
+            MENU_SMALL_H,
+            COLOR_TEXT);
+
+        SDL_RenderPresent(r);
+
+        SDL_Delay(12);
+    }
+}
+
+static void ShowWaitingRoomScreen(
+    SDL_Renderer* r,
+    TTF_Font* font,
+    Board& board,
+    NetworkClient& network)
+{
+    SDL_Event e;
+
+    int mx = 0;
+    int my = 0;
+
+    while (currState == UIState::WAITING_ROOM)
+    {
+        // Opponent has joined
+        if (network.isReady())
+        {
+            std::cout << "[Network] Opponent joined! Starting game.\n";
+
+            // Make sure no mouse button from the previous screen
+            // is carried into the chess board.
+            while (SDL_GetMouseState(nullptr, nullptr) &
+                (SDL_BUTTON_MASK(SDL_BUTTON_LEFT) |
+                    SDL_BUTTON_MASK(SDL_BUTTON_RIGHT)))
+            {
+                SDL_PumpEvents();
+                SDL_Delay(10);
+            }
+
+            SDL_FlushEvents(
+                SDL_EVENT_FIRST,
+                SDL_EVENT_LAST);
+
+            currState = UIState::PLAYING;
+            return;
+        }
+
+        SDL_SetRenderDrawColor(r, 0, 0, 0, 255);
+        SDL_RenderClear(r);
+
+        while (SDL_PollEvent(&e))
+        {
+            if (e.type == SDL_EVENT_QUIT)
+                exit(0);
+
+            if (e.type == SDL_EVENT_MOUSE_MOTION)
+            {
+                mx = static_cast<int>(e.motion.x);
+                my = static_cast<int>(e.motion.y);
+            }
+
+            if (e.type == SDL_EVENT_MOUSE_BUTTON_DOWN)
+            {
+                // BACK / CANCEL
+                if (Hover(mx, my,
+                    MENU_SMALL_X,
+                    MENU_BACK_Y,
+                    MENU_SMALL_W,
+                    MENU_SMALL_H))
+                {
+                    if (network.isConnected())
+                        network.disconnect();
+
+                    currState = UIState::START_MENU;
+                    return;
+                }
+            }
+
+            if (e.type == SDL_EVENT_KEY_DOWN)
+            {
+                if (e.key.key == SDLK_ESCAPE)
+                {
+                    if (network.isConnected())
+                        network.disconnect();
+
+                    currState = UIState::START_MENU;
+                    return;
+                }
+            }
+        }
+
+        // ====================================================
+        // BACKGROUND
+        // ====================================================
+
+        board.drawBoard(r, font);
+
+        SDL_SetRenderDrawColor(r, 28, 28, 28, 255);
+
+        SDL_FRect panelBG = {
+            MENU_PANEL_X,
+            0,
+            PANEL_WIDTH,
+            SCREEN_HEIGHT
+        };
+
+        SDL_RenderFillRect(r, &panelBG);
+
+        drawNumbers(r, font, board.whitePerspective);
+        drawLetters(r, font, board.whitePerspective);
+
+        DrawOverlay(r);
+
+        // ====================================================
+        // PANEL
+        // ====================================================
+
+        DrawShadow(
+            r,
+            MENU_PX,
+            MENU_PY,
+            MENU_PANEL_W,
+            MENU_PANEL_H);
+
+        DrawRounded(
+            r,
+            MENU_PX,
+            MENU_PY,
+            MENU_PANEL_W,
+            MENU_PANEL_H,
+            12,
+            { 40, 40, 40, 230 });
+
+        DrawTextCentered(
+            r,
+            font,
+            "Waiting for Opponent",
+            MENU_PX,
+            MENU_PY + 20,
+            MENU_PANEL_W,
+            50,
+            COLOR_TEXT);
+
+        // ====================================================
+        // ROOM CODE LABEL
+        // ====================================================
+
+        DrawTextCentered(
+            r,
+            font,
+            "Your Room Code",
+            MENU_PX,
+            MENU_PY + 75,
+            MENU_PANEL_W,
+            40,
+            { 190, 190, 190, 255 });
+
+        // ====================================================
+        // ROOM CODE
+        // ====================================================
+
+        std::string roomCode = network.getRoomCode();
+
+        DrawRounded(
+            r,
+            MENU_BUTTON_X,
+            MENU_Y1,
+            MENU_BUTTON_W,
+            MENU_BUTTON_H,
+            10,
+            { 60, 60, 60, 255 });
+
+        if (roomCode.empty())
+        {
+            DrawTextCentered(
+                r,
+                font,
+                "Generating...",
+                MENU_BUTTON_X,
+                MENU_Y1,
+                MENU_BUTTON_W,
+                MENU_BUTTON_H,
+                { 150, 150, 150, 255 });
+        }
+        else
+        {
+            DrawTextCentered(
+                r,
+                font,
+                roomCode,
+                MENU_BUTTON_X,
+                MENU_Y1,
+                MENU_BUTTON_W,
+                MENU_BUTTON_H,
+                COLOR_TEXT);
+        }
+
+        // ====================================================
+        // STATUS
+        // ====================================================
+
+        DrawTextCentered(
+            r,
+            font,
+            "Share this code with your opponent",
+            MENU_PX,
+            MENU_Y2,
+            MENU_PANEL_W,
+            MENU_BUTTON_H,
+            { 190, 190, 190, 255 });
+
+        DrawTextCentered(
+            r,
+            font,
+            "Waiting for opponent...",
+            MENU_PX,
+            MENU_Y3,
+            MENU_PANEL_W,
+            MENU_BUTTON_H,
+            { 190, 190, 190, 255 });
+
+        // ====================================================
+        // BACK
+        // ====================================================
+
+        DrawRounded(
+            r,
+            MENU_SMALL_X,
+            MENU_BACK_Y,
+            MENU_SMALL_W,
+            MENU_SMALL_H,
+            10,
+            { 90, 90, 90, 255 });
+
+        DrawTextCentered(
+            r,
+            font,
+            "CANCEL",
+            MENU_SMALL_X,
+            MENU_BACK_Y,
+            MENU_SMALL_W,
+            MENU_SMALL_H,
+            COLOR_TEXT);
+
+        SDL_RenderPresent(r);
+        SDL_Delay(12);
+    }
+}
+
+static void ShowJoinRoomScreen(
+    SDL_Window* window,
+    SDL_Renderer* r,
+    TTF_Font* font,
+    Board& board,
+    NetworkClient& network)
+{
+    SDL_Event e;
+    int mx = 0, my = 0;
+
+    std::string roomCode;
+    bool inputActive = false;
+
+    SDL_StartTextInput(window);
+
+    while (currState == UIState::JOIN_ROOM)
+    {
+        SDL_SetRenderDrawColor(r, 0, 0, 0, 255);
+        SDL_RenderClear(r);
+
+
+        if (network.consumeRoomFull())
+        {
+            roomCode.clear();
+            inputActive = false;
+
+            SDL_StartTextInput(window);
+        }
+
+        if (network.consumeRoomJoined())
+        {
+            SDL_StopTextInput(window);
+
+            currState = UIState::WAITING_ROOM;
+            return;
+        }
+
+        while (SDL_PollEvent(&e))
+        {
+            if (e.type == SDL_EVENT_QUIT)
+                exit(0);
+
+            // ================= TEXT INPUT =================
+
+            if (e.type == SDL_EVENT_TEXT_INPUT)
+            {
+                if (inputActive)
+                {
+                    for (const char* p = e.text.text; *p; ++p)
+                    {
+                        if (std::isalnum(
+                            static_cast<unsigned char>(*p)))
+                        {
+                            roomCode += static_cast<char>(
+                                std::toupper(
+                                    static_cast<unsigned char>(*p)));
+                        }
+                    }
+
+                    // Room codes are 6 characters
+                    if (roomCode.length() > 6)
+                        roomCode.resize(6);
+                }
+            }
+
+            // ================= MOUSE =================
+
+            if (e.type == SDL_EVENT_MOUSE_MOTION)
+            {
+                mx = static_cast<int>(e.motion.x);
+                my = static_cast<int>(e.motion.y);
+            }
+
+            if (e.type == SDL_EVENT_MOUSE_BUTTON_DOWN)
+            {
+                // ================= CODE INPUT =================
+
+                if (Hover(mx, my,
+                    MENU_BUTTON_X,
+                    MENU_Y1,
+                    MENU_BUTTON_W,
+                    MENU_BUTTON_H))
+                {
+                    inputActive = true;
+                }
+
+                // ================= PASTE CODE =================
+
+                if (Hover(mx, my,
+                    MENU_BUTTON_X,
+                    MENU_Y2,
+                    MENU_BUTTON_W,
+                    MENU_BUTTON_H))
+                {
+                    char* clipboardText = SDL_GetClipboardText();
+
+                    if (clipboardText)
+                    {
+                        roomCode.clear();
+
+                        for (const char* p = clipboardText;
+                            *p && roomCode.length() < 6;
+                            ++p)
+                        {
+                            if (std::isalnum(
+                                static_cast<unsigned char>(*p)))
+                            {
+                                roomCode += static_cast<char>(
+                                    std::toupper(
+                                        static_cast<unsigned char>(*p)));
+                            }
+                        }
+
+                        SDL_free(clipboardText);
+
+                        inputActive = true;
+
+                        std::cout
+                            << "[UI] Pasted room code: "
+                            << roomCode
+                            << '\n';
+                    }
+                    else
+                    {
+                        std::cout
+                            << "[UI] Clipboard is empty\n";
+                    }
+                }
+
+                // ================= JOIN =================
+
+                if (Hover(mx, my,
+                    MENU_BUTTON_X,
+                    MENU_Y3,
+                    MENU_BUTTON_W,
+                    MENU_BUTTON_H))
+                {
+                    std::cout
+                        << "[UI] Join Room clicked\n";
+
+                    if (roomCode.length() != 6)
+                    {
+                        std::cout
+                            << "[Network] Invalid room code\n";
+
+                        continue;
+                    }
+
+                    if (!network.isConnected())
+                    {
+                        std::cout
+                            << "[Network] Connecting to server...\n";
+
+                        if (!network.connect(
+                            "chessify-production.up.railway.app",
+                            443))
+                        {
+                            std::cout
+                                << "[Network] Could not connect to server\n";
+
+                            continue;
+                        }
+                    }
+
+                    if (network.joinRoom(roomCode))
+                    {
+                        std::cout
+                            << "[Network] Join request sent for room: "
+                            << roomCode
+                            << "\n";
+                    }
+                    else
+                    {
+                        std::cout
+                            << "[Network] Failed to join room\n";
+                    }
+                }
+
+                // ================= BACK =================
+
+                if (Hover(mx, my,
+                    MENU_SMALL_X,
+                    MENU_BACK_Y,
+                    MENU_SMALL_W,
+                    MENU_SMALL_H))
+                {
+                    std::cout
+                        << "[UI] Back clicked\n";
+
+                    SDL_StopTextInput(window);
+
+                    if (network.isConnected())
+                        network.disconnect();
+
+                    currState = UIState::START_MENU;
+                    return;
+                }
+            }
+
+            // ================= KEYBOARD =================
+
+            if (e.type == SDL_EVENT_KEY_DOWN)
+            {
+                // Backspace
+                if (e.key.key == SDLK_BACKSPACE &&
+                    inputActive)
+                {
+                    if (!roomCode.empty())
+                        roomCode.pop_back();
+                }
+
+                // Escape
+                if (e.key.key == SDLK_ESCAPE)
+                {
+                    SDL_StopTextInput(window);
+
+                    if (network.isConnected())
+                        network.disconnect();
+
+                    currState = UIState::START_MENU;
+                    return;
+                }
+
+                if (e.key.key == SDLK_RETURN && inputActive)
+                {
+                    if (roomCode.length() != 6)
+                    {
+                        std::cout << "[Network] Invalid room code\n";
+                        continue;
+                    }
+
+                    std::cout << "[UI] Enter pressed - Join Room\n";
+
+                    if (!network.isConnected())
+                    {
+                        std::cout << "[Network] Connecting to server...\n";
+
+                        if (!network.connect(
+                            "chessify-production.up.railway.app",
+                            443))
+                        {
+                            std::cout << "[Network] Could not connect to server\n";
+                            continue;
+                        }
+                    }
+
+                    if (network.joinRoom(roomCode))
+                    {
+                        std::cout << "[Network] Join request sent for room: "
+                            << roomCode << "\n";
+                    }
+
+                    std::cout << "[Network] Failed to join room\n";
+                }
+            }
+        }
+
+        // ==================================================
+        // BACKGROUND
+        // ==================================================
+
+        board.drawBoard(r, font);
+
+        SDL_SetRenderDrawColor(r, 28, 28, 28, 255);
+
+        SDL_FRect panelBG = {
+            MENU_PANEL_X,
+            0,
+            PANEL_WIDTH,
+            SCREEN_HEIGHT
+        };
+
+        SDL_RenderFillRect(r, &panelBG);
+
+        drawNumbers(r, font, board.whitePerspective);
+        drawLetters(r, font, board.whitePerspective);
+
+        DrawOverlay(r);
+
+        // ==================================================
+        // PANEL
+        // ==================================================
+
+        DrawShadow(
+            r,
+            MENU_PX,
+            MENU_PY,
+            MENU_PANEL_W,
+            MENU_PANEL_H);
+
+        DrawRounded(
+            r,
+            MENU_PX,
+            MENU_PY,
+            MENU_PANEL_W,
+            MENU_PANEL_H,
+            12,
+            { 40, 40, 40, 230 });
+
+        // ================= TITLE =================
+
+        DrawTextCentered(
+            r,
+            font,
+            "Join Room",
+            MENU_PX,
+            MENU_PY + 20,
+            MENU_PANEL_W,
+            50,
+            COLOR_TEXT);
+
+        // ==================================================
+        // ROOM CODE INPUT
+        // ==================================================
+
+        SDL_Color inputColor =
+            inputActive
+            ? SDL_Color{ 75, 75, 75, 255 }
+        : SDL_Color{ 60, 60, 60, 255 };
+
+        DrawRounded(
+            r,
+            MENU_BUTTON_X,
+            MENU_Y1,
+            MENU_BUTTON_W,
+            MENU_BUTTON_H,
+            10,
+            inputColor);
+
+        std::string displayCode = roomCode;
+
+        if (displayCode.empty())
+            displayCode = "Enter Code";
+
+        SDL_Color codeColor =
+            roomCode.empty()
+            ? SDL_Color{ 150, 150, 150, 255 }
+        : COLOR_TEXT;
+
+        DrawTextCentered(
+            r,
+            font,
+            displayCode,
+            MENU_BUTTON_X,
+            MENU_Y1,
+            MENU_BUTTON_W,
+            MENU_BUTTON_H,
+            codeColor);
+
+        // ==================================================
+        // PASTE CODE
+        // ==================================================
+
+        FancyButton(
+            r,
+            mx,
+            my,
+            MENU_BUTTON_X,
+            MENU_Y2,
+            MENU_BUTTON_W,
+            MENU_BUTTON_H,
+            "Paste Code",
+            font);
+
+        // ==================================================
+        // JOIN
+        // ==================================================
+
+        FancyButton(
+            r,
+            mx,
+            my,
+            MENU_BUTTON_X,
+            MENU_Y3,
+            MENU_BUTTON_W,
+            MENU_BUTTON_H,
+            "Join",
+            font);
+
+        // ==================================================
+        // BACK
+        // ==================================================
+
+        DrawRounded(
+            r,
+            MENU_SMALL_X,
+            MENU_BACK_Y,
+            MENU_SMALL_W,
+            MENU_SMALL_H,
+            10,
+            { 200, 60, 60, 255 });
+
+        DrawTextCentered(
+            r,
+            font,
+            "Back",
+            MENU_SMALL_X,
+            MENU_BACK_Y,
+            MENU_SMALL_W,
+            MENU_SMALL_H,
+            COLOR_TEXT);
 
         SDL_RenderPresent(r);
         SDL_Delay(12);
@@ -494,8 +2007,8 @@ static void DrawConnectingScreen(SDL_Renderer* renderer, TTF_Font* font, Board& 
 
     SDL_RenderFillRect(renderer, &panelBG);
 
-    drawNumbers(renderer, font);
-    drawLetters(renderer, font);
+    drawNumbers(renderer, font, board.whitePerspective);
+    drawLetters(renderer, font, board.whitePerspective);
 
     // Dark overlay
     DrawOverlay(renderer);
@@ -588,10 +2101,38 @@ static SDL_Texture *loadTexture(SDL_Renderer *renderer, const std::string &path)
 }
 
 // Function to render the piece
-static void render(SDL_Renderer *renderer, TTF_Font *font, Board &board, MovePanel &panel, MoveHistory &moveHistory, NetworkClient& network)
+static void render(
+    SDL_Renderer* renderer,
+    TTF_Font* font,
+    Board& board,
+    MovePanel& panel,
+    MoveHistory& moveHistory,
+    NetworkClient& network)
 {
     board.drawBoard(renderer, font);
-    panel.draw(renderer, font, moveHistory, network.getPlayerColor());
+
+    PlayerColor displayColor = PlayerColor::None;
+
+    // Online multiplayer
+    if (network.isConnected())
+    {
+        displayColor = network.getPlayerColor();
+    }
+    // Stockfish
+    else if (SETTINGS.vsEngine)
+    {
+        if (SETTINGS.playerColor == PlayerColorChoice::WHITE)
+            displayColor = PlayerColor::White;
+        else if (SETTINGS.playerColor == PlayerColorChoice::BLACK)
+            displayColor = PlayerColor::Black;
+    }
+
+    panel.draw(
+        renderer,
+        font,
+        moveHistory,
+        displayColor
+    );
 
     if (board.gameOver)
     {
@@ -599,18 +2140,9 @@ static void render(SDL_Renderer *renderer, TTF_Font *font, Board &board, MovePan
         return;
     }
 
-    for (Piece *piece : board.getPieces())
-    {
-        if (board.promotionActive && piece == board.promoPawn)
-            continue;
-
-        piece->drawPiece(renderer, Board::pieceTextures);
-    }
-
-    drawNumbers(renderer, font);
-    drawLetters(renderer, font);
+    drawNumbers(renderer, font, board.whitePerspective);
+    drawLetters(renderer, font, board.whitePerspective);
 }
-
 static void DrawConnectionLostScreen(SDL_Renderer* renderer,
     TTF_Font* font,
     Board& board,
@@ -633,8 +2165,8 @@ static void DrawConnectionLostScreen(SDL_Renderer* renderer,
 
     SDL_RenderFillRect(renderer, &panelBG);
 
-    drawNumbers(renderer, font);
-    drawLetters(renderer, font);
+    drawNumbers(renderer, font, board.whitePerspective);
+    drawLetters(renderer, font, board.whitePerspective);
 
     // Dark overlay
     DrawOverlay(renderer);
@@ -783,17 +2315,58 @@ int main()
     {
         if (currState == UIState::PLAYING && network.hasDisconnected()) {
             std::cout << "[UI] Switching to CONNECTION_LOST\n";
-            currState = UIState::CONNECTION_LOST;
+
+            board.setConnectionGameOver();
         }
 
-        if (currState == UIState::PLAYING && network.isConnected())
+        // ==========================================
+        // PROCESS REMOTE NETWORK MOVES
+        // ==========================================
+
+        if (network.isConnected() &&
+            network.isReady())
         {
+            PlayerColor color = network.getPlayerColor();
+
+            if (color == PlayerColor::White)
+                board.setPerspective(true);
+            else if (color == PlayerColor::Black)
+                board.setPerspective(false);
+
             while (network.hasPendingMessages())
             {
-                MoveMessage move = network.getNextMove();
-                gameController.applyRemoteMove(move);
+                std::cout
+                    << "[MAIN] Processing incoming network move\n";
+
+                MoveMessage move =
+                    network.getNextMove();
+
+                std::cout
+                    << "[MAIN] Got move: "
+                    << move.fromRow << " "
+                    << move.fromCol << " "
+                    << move.toRow << " "
+                    << move.toCol
+                    << '\n';
+
+                bool moveApplied =
+                    gameController.applyRemoteMove(move);
+
+                std::cout
+                    << "[MAIN] applyRemoteMove returned: "
+                    << moveApplied
+                    << '\n';
+
+                if (!moveApplied)
+                {
+                    std::cout
+                        << "[MAIN] ERROR: Remote move could not be applied\n";
+                }
             }
         }
+
+        if (network.hasDisconnected() && !board.gameOver)
+            board.setConnectionGameOver();
 
         playerMoved = false;
 
@@ -805,11 +2378,6 @@ int main()
         {
             if (currState == UIState::START_MENU)
                 continue;
-            else if (currState == UIState::CONNECTION_LOST)
-            {
-                DrawConnectionLostScreen(renderer, font, board, mx, my);
-                //continue;
-            }
 
             switch (event.type)
             {
@@ -976,9 +2544,8 @@ int main()
                         selectedPiece = board.selectPiece(mouseX, mouseY);
                     else
                     {
-                        gameController.playMove(renderer, selectedPiece, mouseX, mouseY);
+                        playerMoved = gameController.playMove(renderer, selectedPiece, mouseX, mouseY);
                         selectedPiece = nullptr;
-                        playerMoved = true;
                     }
                 }
             }
@@ -991,9 +2558,8 @@ int main()
 
                 if (event.button.button == SDL_BUTTON_LEFT && selectedPiece)
                 {
-                    gameController.playMove(renderer, selectedPiece, mouseX, mouseY);
+                    playerMoved = gameController.playMove(renderer, selectedPiece, mouseX, mouseY);
                     selectedPiece = nullptr;
-                    playerMoved = true;
                 }
             }
             break;
@@ -1007,62 +2573,122 @@ int main()
         {
             SETTINGS = ShowStartScreen(renderer, font, board);
 
-            if (!SETTINGS.vsEngine)
+            // ================= CREATE ROOM =================
+
+            if (currState == UIState::CREATE_ROOM)
             {
-                std::cout << "Attempting to connect...\n";
-
-                currState = UIState::CONNECTING;
-                DrawConnectingScreen(renderer, font, board, "Waiting for the opponent...");
-
-                if (network.connect("chessify-production.up.railway.app", 443))
-                {
-                    std::cout << "Connected to Railway!\n";
-                    network.createRoom();
-                }
-                else
-                {
-                    DrawConnectingScreen(renderer, font, board, "Server not found!");
-                    SDL_Delay(2000);
-
-                    currState = UIState::START_MENU;
-                    continue;
-                }
-
-                while (!network.isReady())
-                {
-                    DrawConnectingScreen(renderer, font, board, "Waiting for the opponent...");
-
-                    SDL_PumpEvents();
-                    SDL_Delay(16);
-                }
-
-                // Wait until the user releases all mouse buttons
-                while (SDL_GetMouseState(nullptr, nullptr) & (SDL_BUTTON_MASK(SDL_BUTTON_LEFT) | SDL_BUTTON_MASK(SDL_BUTTON_RIGHT)))
-                {
-                    SDL_PumpEvents();
-                    SDL_Delay(10);
-                }
-
-                SDL_FlushEvents(SDL_EVENT_FIRST, SDL_EVENT_LAST);
-
-                selectedPiece = nullptr;
-                playerMoved = false;
+                ShowCreateRoomScreen(renderer, font, board, network);
+                continue;
             }
-            else
+
+            else if (currState == UIState::WAITING_ROOM)
+            {
+                ShowWaitingRoomScreen(renderer, font, board, network);
+                continue;
+            }
+
+            // ================= JOIN ROOM =================
+
+            else if (currState == UIState::JOIN_ROOM)
+            {
+                ShowJoinRoomScreen(window, renderer, font, board, network);
+                continue;
+            }
+
+            // ================= STOCKFISH =================
+
+            if (SETTINGS.vsEngine)
             {
                 if (!Engine::start())
                 {
                     std::cerr << "Failed to start engine.\n";
                     return -1;
                 }
+
                 if (!Engine::init())
                 {
                     std::cerr << "Failed to init engine.\n";
                     return -1;
                 }
+
+                currState = UIState::PLAYING;
             }
 
-            currState = UIState::PLAYING;
+            // ================= OLD ONLINE FALLBACK =================
+
+            //else
+            //{
+            //    std::cout << "Attempting to connect...\n";
+
+            //    currState = UIState::CONNECTING;
+
+            //    DrawConnectingScreen(
+            //        renderer,
+            //        font,
+            //        board,
+            //        "Waiting for the opponent...");
+
+            //    if (network.connect("chessify-production.up.railway.app", 443))
+            //    {
+            //        std::cout << "Connected to Railway!\n";
+            //        network.joinRoom("R27PWX");
+            //    }
+            //    else
+            //    {
+            //        DrawConnectingScreen(
+            //            renderer,
+            //            font,
+            //            board,
+            //            "Server not found!");
+
+            //        SDL_Delay(2000);
+
+            //        currState = UIState::START_MENU;
+            //        continue;
+            //    }
+
+            //    while (!network.isReady())
+            //    {
+            //        DrawConnectingScreen(
+            //            renderer,
+            //            font,
+            //            board,
+            //            "Waiting for the opponent...");
+
+            //        SDL_PumpEvents();
+            //        SDL_Delay(16);
+            //    }
+
+            //    // Wait until the user releases all mouse buttons
+            //    while (SDL_GetMouseState(nullptr, nullptr) &
+            //        (SDL_BUTTON_MASK(SDL_BUTTON_LEFT) |
+            //            SDL_BUTTON_MASK(SDL_BUTTON_RIGHT)))
+            //    {
+            //        SDL_PumpEvents();
+            //        SDL_Delay(10);
+            //    }
+
+            //    SDL_FlushEvents(
+            //        SDL_EVENT_FIRST,
+            //        SDL_EVENT_LAST);
+
+            //    selectedPiece = nullptr;
+            //    playerMoved = false;
+
+            //    currState = UIState::PLAYING;
+            //}
+        }
+        else if (currState == UIState::CREATE_ROOM)
+        {
+            // Create Room screen handles its own rendering
+        }
+        else if (currState == UIState::JOIN_ROOM)
+        {
+            // Join Room screen handles its own rendering
+        }
+        else if (currState == UIState::CONNECTION_LOST)
+        {
+            DrawConnectionLostScreen(renderer, font, board, mx, my);
         }
         else
             render(renderer, font, board, panel, moveHistory, network);
@@ -1072,9 +2698,16 @@ int main()
 
         SDL_RenderPresent(renderer);
 
-        // === STOCKFISH PLAYS BLACK ===
-        if (SETTINGS.vsEngine && playerMoved && !board.isWhiteTurn &&
-            !board.gameOver && currState == UIState::PLAYING &&
+        bool engineTurn =
+            (SETTINGS.playerColor == PlayerColorChoice::WHITE &&
+                !board.isWhiteTurn) ||
+            (SETTINGS.playerColor == PlayerColorChoice::BLACK &&
+                board.isWhiteTurn);
+
+        if (SETTINGS.vsEngine &&
+            engineTurn &&
+            !board.gameOver &&
+            currState == UIState::PLAYING &&
             !board.viewingHistory)
         {
             Engine::send(board.uciHistory);
@@ -1114,8 +2747,15 @@ int main()
                 continue;
             }
 
-            gameController.playMove(renderer, p, BORDER_WIDTH_X + toCol * SQUARE_SIZE, 
-                                                 BORDER_WIDTH_Y + toRow * SQUARE_SIZE, promo);
+            int dispRow = board.whitePerspective ? toRow : BOARD_SIZE - 1 - toRow;
+            int dispCol = board.whitePerspective ? toCol : BOARD_SIZE - 1 - toCol;
+
+            gameController.playMove(
+                renderer,
+                p,
+                BORDER_WIDTH_X + dispCol * SQUARE_SIZE,
+                BORDER_WIDTH_Y + dispRow * SQUARE_SIZE,
+                promo);
         }
     }
 

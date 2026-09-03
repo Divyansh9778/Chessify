@@ -65,6 +65,9 @@ Board::Board()
 
         board[row][col] = piece;
     }
+
+    positionOccurrences.clear();
+    recordPosition();
 }
 
 Board::~Board()
@@ -153,6 +156,12 @@ void Board::resetBoardState()
     gameOver = false;
     stalemate = false;
     losingKing = nullptr;
+
+    draw = false;
+    halfmoveClock = 0;
+    positionOccurrences.clear();
+    recordPosition();
+
     promotionActive = false;
     promoPawn = nullptr;
 
@@ -199,6 +208,7 @@ void Board::replayTo(MoveHistory& history, int index)
     // recompute game state after replay
     gameOver = false;
     stalemate = false;
+    draw = false;
     losingKing = nullptr;
 
     if (Board::isCheckmate(isWhiteTurn))
@@ -221,6 +231,11 @@ void Board::replayTo(MoveHistory& history, int index)
     {
         gameOver = true;
         stalemate = true;
+    }
+    else if (isInsufficientMaterial())
+    {
+        gameOver = true;
+        draw = true;
     }
 }
 
@@ -411,9 +426,12 @@ void Board::drawBoard(SDL_Renderer* renderer, TTF_Font* font)
     {
         for (int col = 0; col < BOARD_SIZE; col++)
         {
+            int dispRow = (whitePerspective) ? row : BOARD_SIZE - 1 - row;
+            int dispCol = (whitePerspective) ? col : BOARD_SIZE - 1 - col;
+
             SDL_FRect square = {
-                BORDER_WIDTH_X + col * SQUARE_SIZE,
-                BORDER_WIDTH_Y + row * SQUARE_SIZE,
+                BORDER_WIDTH_X + dispCol * SQUARE_SIZE,
+                BORDER_WIDTH_Y + dispRow * SQUARE_SIZE,
                 SQUARE_SIZE,
                 SQUARE_SIZE
             };
@@ -444,7 +462,7 @@ void Board::drawBoard(SDL_Renderer* renderer, TTF_Font* font)
         if (!piece)
             continue;
 
-        if (gameOver)
+        if (gameOver && !stalemate && !draw)
         {
             bool isWhiteKing = (piece->type == "wk");
             bool isBlackKing = (piece->type == "bk");
@@ -453,7 +471,22 @@ void Board::drawBoard(SDL_Renderer* renderer, TTF_Font* font)
                 continue;
         }
 
+        int originalX = piece->xPos;
+        int originalY = piece->yPos;
+
+        int boardCol = originalX / SQUARE_SIZE;
+        int boardRow = originalY / SQUARE_SIZE;
+        
+        int dispRow = (whitePerspective) ? boardRow : BOARD_SIZE - 1 - boardRow;
+        int dispCol = (whitePerspective) ? boardCol : BOARD_SIZE - 1 - boardCol;
+
+        piece->xPos = dispCol * SQUARE_SIZE;
+        piece->yPos = dispRow * SQUARE_SIZE;
+
         piece->drawPiece(renderer, pieceTextures);
+
+        piece->xPos = originalX;
+        piece->yPos = originalY;
     }
 
     if (promotionActive && promoPawn)
@@ -495,11 +528,14 @@ void Board::initializePieces()
 
 Piece* Board::selectPiece(int x, int y)
 {
-    int col = (x - BORDER_WIDTH_X) / SQUARE_SIZE;
-    int row = (y - BORDER_WIDTH_Y) / SQUARE_SIZE;
+    int dispCol = (x - BORDER_WIDTH_X) / SQUARE_SIZE;
+    int dispRow = (y - BORDER_WIDTH_Y) / SQUARE_SIZE;
 
-    if (row >= 0 && row < BOARD_SIZE && col >= 0 && col < BOARD_SIZE)
+    if (dispRow >= 0 && dispRow < BOARD_SIZE && dispCol >= 0 && dispCol < BOARD_SIZE)
     {
+		int row = (whitePerspective) ? dispRow : BOARD_SIZE - 1 - dispRow;
+		int col = (whitePerspective) ? dispCol : BOARD_SIZE - 1 - dispCol;
+
         Piece* piece = board[row][col];
 
         if (piece && piece->isWhite == isWhiteTurn)
@@ -530,14 +566,33 @@ std::pair<int, int> Board::uciToCoord(const std::string& uci)
     return { row, col };
 }
 
-void Board::executeMove(Piece* piece, int newRow, int newCol, MoveHistory& moveHistory, char forcedPromotion)
+bool Board::executeMove(Piece* piece, int newRow, int newCol, MoveHistory& moveHistory, char forcedPromotion)
 {
+    std::cout
+        << "[Board] executeMove: "
+        << piece->type
+        << " "
+        << (piece->isWhite ? "WHITE" : "BLACK")
+        << " | Board turn = "
+        << (isWhiteTurn ? "WHITE" : "BLACK")
+        << '\n';
+
+    if (!piece)
+        return false;
+
+    if (piece->isWhite != isWhiteTurn)
+    {
+        std::cout
+            << "[Board] executeMove BLOCKED: piece color != board turn\n";
+        return false;
+    }
+
     int oldRow = piece->yPos / SQUARE_SIZE;
     int oldCol = piece->xPos / SQUARE_SIZE;
 
     if (oldRow < 0 || oldRow >= BOARD_SIZE ||
         oldCol < 0 || oldCol >= BOARD_SIZE)
-        return;
+        return false;
 
     int materialDelta = 0;
 
@@ -549,15 +604,41 @@ void Board::executeMove(Piece* piece, int newRow, int newCol, MoveHistory& moveH
             blinkCheck = true;
             blinkStart = SDL_GetTicks();
         }
-        return;
+        return false;
     }
 
     MoveType type = Move::getLastMoveType();
+    std::cout
+        << "[Board] Detected MoveType = "
+        << static_cast<int>(type)
+        << '\n';
 
     // Capture info BEFORE deletion
     char captured = '.';
     if (board[newRow][newCol])
         captured = board[newRow][newCol]->type[1];
+
+    // ==================================================
+    // 75-MOVE RULE
+    // ==================================================
+
+    bool isPawnMove =
+        (piece->type == "wp" ||
+            piece->type == "bp");
+
+    bool isCapture =
+        (board[newRow][newCol] != nullptr) ||
+        (Move::getLastMoveType() == MoveType::EnPassant);
+
+    if (isPawnMove || isCapture)
+        halfmoveClock = 0;
+    else
+        halfmoveClock++;
+
+    std::cout
+        << "[DRAW] Halfmove clock = "
+        << halfmoveClock
+        << '\n';
 
     // Reset en-passant eligibility
     for (Piece* p : pieces)
@@ -751,12 +832,12 @@ void Board::executeMove(Piece* piece, int newRow, int newCol, MoveHistory& moveH
             applyPromotion(forcedPromotion, moveHistory);
         else
             promotionActive = true;
-        return;
+        return true;
     }
     break;
 
     default:
-        return;
+        return false;
     }
 
     Board::setLastMoved(piece);
@@ -768,6 +849,7 @@ void Board::executeMove(Piece* piece, int newRow, int newCol, MoveHistory& moveH
 
     piece->hasMoved = true;
     isWhiteTurn = !isWhiteTurn;
+    recordPosition();
 
     bool givesCheck = Board::isKingInCheck(isWhiteTurn, board);
 
@@ -848,7 +930,50 @@ void Board::executeMove(Piece* piece, int newRow, int newCol, MoveHistory& moveH
         }
 
         gameOverStart = SDL_GetTicks();
-        return;
+        return true;
+    }
+
+    // ==================================================
+    // 75-MOVE DRAW
+    // ==================================================
+
+    if (halfmoveClock >= 150)
+    {
+        gameOver = true;
+        draw = true;
+        stalemate = false;
+
+        gameOverStart = SDL_GetTicks();
+
+        std::cout << "[DRAW] 75-move rule\n";
+        return true;
+    }
+
+    // ==================================================
+    // FIVEFOLD REPETITION
+    // ==================================================
+
+    if (isFivefoldRepetition())
+    {
+        gameOver = true;
+        draw = true;
+        stalemate = false;
+
+        std::cout<< "[DRAW] Fivefold repetition\n";
+
+        gameOverStart = SDL_GetTicks();
+        return true;
+    }
+
+    if (Board::isInsufficientMaterial())
+    {
+        gameOver = true;
+        stalemate = false;
+
+        gameOverStart = SDL_GetTicks();
+
+        std::cout << "[DRAW] Insufficient material\n";
+        return true;
     }
 
     if (Board::isStalemate(isWhiteTurn))
@@ -856,22 +981,24 @@ void Board::executeMove(Piece* piece, int newRow, int newCol, MoveHistory& moveH
         gameOver = true;
         stalemate = true;
 
-        for (int r = 0; r < BOARD_SIZE; r++)
-            for (int c = 0; c < BOARD_SIZE; c++)
-                if (board[r][c] && board[r][c]->type != "wk" && board[r][c]->type != "bk")
-                    board[r][c] = nullptr;
+        //for (int r = 0; r < BOARD_SIZE; r++)
+        //    for (int c = 0; c < BOARD_SIZE; c++)
+        //        if (board[r][c] && board[r][c]->type != "wk" && board[r][c]->type != "bk")
+        //            board[r][c] = nullptr;
 
-        pieces.erase(std::remove_if(pieces.begin(), pieces.end(), [](Piece* p)
-            {
-                if (p->type == "wk" || p->type == "bk")
-                    return false;
-                delete p;
-                return true;
-            }), pieces.end());
+        //pieces.erase(std::remove_if(pieces.begin(), pieces.end(), [](Piece* p)
+        //    {
+        //        if (p->type == "wk" || p->type == "bk")
+        //            return false;
+        //        delete p;
+        //        return true;
+        //    }), pieces.end());
 
         gameOverStart = SDL_GetTicks();
-        return;
+        return true;
     }
+
+    return true;
 }
 
 void Board::movePiece(SDL_Renderer* renderer, Piece* piece, int x, int y, MoveHistory& moveHistory, char forcedPromotion)
@@ -885,18 +1012,41 @@ void Board::movePiece(SDL_Renderer* renderer, Piece* piece, int x, int y, MoveHi
         return;
     }
 
-    if (gameOver) return;
+    if (gameOver)
+    {
+        std::cout << "[Board] BLOCKED: gameOver = true\n";
+        return;
+    }
 
-    if (!piece) return;
-    if ((isWhiteTurn && !piece->isWhite) || (!isWhiteTurn && piece->isWhite))
+    if (!piece)
+    {
+        std::cout << "[Board] BLOCKED: piece = nullptr\n";
+        return;
+    }
+
+    std::cout
+        << "[Board] Turn = "
+        << (isWhiteTurn ? "WHITE" : "BLACK")
+        << " | Piece = "
+        << piece->type
+        << '\n';
+
+    if ((isWhiteTurn && !piece->isWhite) ||
+        (!isWhiteTurn && piece->isWhite))
+    {
+        std::cout << "[Board] BLOCKED: wrong color\n";
+        return;
+    }
+
+    int dispRow = (y - BORDER_WIDTH_Y) / SQUARE_SIZE;
+    int dispCol = (x - BORDER_WIDTH_X) / SQUARE_SIZE;
+
+    if (dispRow < 0 || dispRow >= BOARD_SIZE ||
+        dispCol < 0 || dispCol >= BOARD_SIZE)
         return;
 
-    int newRow = (y - BORDER_WIDTH_Y) / SQUARE_SIZE;
-    int newCol = (x - BORDER_WIDTH_X) / SQUARE_SIZE;
-
-    if (newRow < 0 || newRow >= BOARD_SIZE ||
-        newCol < 0 || newCol >= BOARD_SIZE)
-        return;
+    int newRow = whitePerspective ? dispRow : BOARD_SIZE - 1 - dispRow;
+    int newCol = whitePerspective ? dispCol : BOARD_SIZE - 1 - dispCol;
 
     executeMove(piece, newRow, newCol, moveHistory, forcedPromotion);
 }
@@ -1006,8 +1156,11 @@ Piece* Board::promotePawn(SDL_Renderer* renderer, Piece* pawn, int row, int col)
 
 void Board::drawPromotionMenu(SDL_Renderer* renderer)
 {
-    float x = BORDER_WIDTH_X + promoCol * SQUARE_SIZE;
-    float y = BORDER_WIDTH_Y + promoRow * SQUARE_SIZE;
+    int dispRow = whitePerspective ? promoRow : BOARD_SIZE - 1 - promoRow;
+    int dispCol = whitePerspective ? promoCol : BOARD_SIZE - 1 - promoCol;
+
+    float x = BORDER_WIDTH_X + dispCol * SQUARE_SIZE;
+    float y = BORDER_WIDTH_Y + dispRow * SQUARE_SIZE;
 
     float w = SQUARE_SIZE / 2.0f;
 
@@ -1048,8 +1201,11 @@ void Board::drawPromotionMenu(SDL_Renderer* renderer)
 
 void Board::handlePromotionClick(int mouseX, int mouseY, MoveHistory& moveHistory)
 {
-    float x0 = BORDER_WIDTH_X + promoCol * SQUARE_SIZE;
-    float y0 = BORDER_WIDTH_Y + promoRow * SQUARE_SIZE;
+    int dispRow = whitePerspective ? promoRow : BOARD_SIZE - 1 - promoRow;
+    int dispCol = whitePerspective ? promoCol : BOARD_SIZE - 1 - promoCol;
+
+    float x0 = BORDER_WIDTH_X + dispCol * SQUARE_SIZE;
+    float y0 = BORDER_WIDTH_Y + dispRow * SQUARE_SIZE;
 
     float w = SQUARE_SIZE / 2.0f;
     float h = SQUARE_SIZE / 2.0f;
@@ -1077,6 +1233,9 @@ void Board::applyPromotion(char promoChar, MoveHistory& moveHistory)
     promoChar = static_cast<char>(tolower(static_cast<unsigned char>(promoChar)));
 
     bool isWhite = promoPawn->isWhite;
+
+    // Promotion is a pawn move, so the 75-move, counter resets.
+    halfmoveClock = 0;
 
     std::string newType =
         std::string(1, isWhite ? 'w' : 'b') + promoChar;
@@ -1126,6 +1285,14 @@ void Board::applyPromotion(char promoChar, MoveHistory& moveHistory)
     lastToCol = col;
 
     isWhiteTurn = !isWhiteTurn;
+    halfmoveClock = 0;
+    recordPosition();
+
+    std::cout
+        << "[Board] AFTER PROMOTION: "
+        << "isWhiteTurn="
+        << (isWhiteTurn ? "WHITE" : "BLACK")
+        << '\n';
 
     std::cout << "[Board] Promotion complete. "
         << "Next turn: "
@@ -1137,6 +1304,14 @@ void Board::applyPromotion(char promoChar, MoveHistory& moveHistory)
     bool givesMate = false;
     if (givesCheck)
         givesMate = Board::isCheckmate(isWhiteTurn);
+
+    std::cout
+        << "[PROMOTION RESULT] "
+        << "check=" << givesCheck
+        << " mate=" << givesMate
+        << " nextTurn="
+        << (isWhiteTurn ? "WHITE" : "BLACK")
+        << '\n';
 
     // Unified recording here
     MoveRecord record(
@@ -1165,12 +1340,14 @@ void Board::applyPromotion(char promoChar, MoveHistory& moveHistory)
     currentMoveIndex = moveHistory.size();
     viewingHistory = false;
 
-    if (Board::isCheckmate(isWhiteTurn))
+    if (givesMate)
     {
         gameOver = true;
         whiteLost = isWhiteTurn;
 
-        std::string kingType = whiteLost ? "wk" : "bk";
+        std::string kingType =
+            whiteLost ? "wk" : "bk";
+
         losingKing = nullptr;
 
         for (Piece* p : pieces)
@@ -1186,7 +1363,12 @@ void Board::applyPromotion(char promoChar, MoveHistory& moveHistory)
         {
             board[losingKing->yPos / SQUARE_SIZE][losingKing->xPos / SQUARE_SIZE] = nullptr;
 
-            auto it = std::find(pieces.begin(), pieces.end(), losingKing);
+            auto it = std::find(
+                pieces.begin(),
+                pieces.end(),
+                losingKing
+            );
+
             if (it != pieces.end())
                 pieces.erase(it);
         }
@@ -1195,29 +1377,71 @@ void Board::applyPromotion(char promoChar, MoveHistory& moveHistory)
         return;
     }
 
-    if (Board::isStalemate(isWhiteTurn))
+    if (halfmoveClock >= 150)
+    {
+        gameOver = true;
+        draw = true;
+        stalemate = false;
+
+        std::cout << "[DRAW] 75-move rule after promotion\n";
+
+        gameOverStart = SDL_GetTicks();
+        return;
+    }
+
+    if (isFivefoldRepetition())
+    {
+        gameOver = true;
+        draw = true;
+        stalemate = false;
+
+        gameOverStart = SDL_GetTicks();
+        return;
+    }
+
+    if (isInsufficientMaterial())
+    {
+        gameOver = true;
+        draw = true;
+        stalemate = false;
+
+        gameOverStart = SDL_GetTicks();
+
+        std::cout << "[DRAW] Insufficient material after promotion\n";
+        return;
+    }
+
+    if (!givesCheck && Board::isStalemate(isWhiteTurn))
     {
         gameOver = true;
         stalemate = true;
 
-        for (int r = 0; r < BOARD_SIZE; r++)
-            for (int c = 0; c < BOARD_SIZE; c++)
-                if (board[r][c] &&
-                    board[r][c]->type != "wk" &&
-                    board[r][c]->type != "bk")
-                    board[r][c] = nullptr;
+        //for (int r = 0; r < BOARD_SIZE; r++)
+        //{
+        //    for (int c = 0; c < BOARD_SIZE; c++)
+        //    {
+        //        if (board[r][c] &&
+        //            board[r][c]->type != "wk" &&
+        //            board[r][c]->type != "bk")
+        //            board[r][c] = nullptr;
+        //    }
+        //}
 
-        pieces.erase(std::remove_if(
-            pieces.begin(),
-            pieces.end(),
-            [](Piece* p)
-            {
-                if (p->type == "wk" || p->type == "bk")
-                    return false;
-                delete p;
-                return true;
-            }),
-            pieces.end());
+        //pieces.erase(
+        //    std::remove_if(
+        //        pieces.begin(),
+        //        pieces.end(),
+        //        [](Piece* p)
+        //        {
+        //            if (p->type == "wk" ||
+        //                p->type == "bk")
+        //                return false;
+
+        //            delete p;
+        //            return true;
+        //        }),
+        //    pieces.end()
+        //);
 
         gameOverStart = SDL_GetTicks();
         return;
@@ -1262,8 +1486,11 @@ void Board::highlightCheckedKing(SDL_Renderer* renderer)
             int row = p->yPos / SQUARE_SIZE;
             int col = p->xPos / SQUARE_SIZE;
 
-            float x = BORDER_WIDTH_X + col * SQUARE_SIZE;
-            float y = BORDER_WIDTH_Y + row * SQUARE_SIZE;
+            int dispRow = whitePerspective ? row : BOARD_SIZE - 1 - row;
+            int dispCol = whitePerspective ? col : BOARD_SIZE - 1 - col;
+
+            float x = BORDER_WIDTH_X + dispCol * SQUARE_SIZE;
+            float y = BORDER_WIDTH_Y + dispRow * SQUARE_SIZE;
 
             SDL_FRect square = { x, y, SQUARE_SIZE, SQUARE_SIZE };
 
@@ -1286,21 +1513,34 @@ void Board::highlightCheckedKing(SDL_Renderer* renderer)
 
 bool Board::isCheckmate(bool isWhite)
 {
-    // 1. King must be in check
+    std::cout
+        << "\n[CHECKMATE TEST] "
+        << (isWhite ? "WHITE" : "BLACK")
+        << '\n';
+
     if (!Board::isKingInCheck(isWhite, board))
+    {
+        std::cout << "[CHECKMATE TEST] King NOT in check\n";
         return false;
+    }
 
-    // 2. Side must have no legal moves
     if (hasAnyLegalMove(isWhite))
+    {
+        std::cout << "[CHECKMATE TEST] Legal move exists\n";
         return false;
+    }
 
-    return true; // Check + No legal moves = Checkmate
+    std::cout << "[CHECKMATE TEST] CHECKMATE\n";
+    return true;
 }
 
 bool Board::hasAnyLegalMove(bool isWhite)
 {
     for (Piece* piece : pieces)
     {
+        if (!piece)
+            continue;
+
         if (piece->isWhite != isWhite)
             continue;
 
@@ -1311,26 +1551,28 @@ bool Board::hasAnyLegalMove(bool isWhite)
         {
             for (int c = 0; c < BOARD_SIZE; c++)
             {
-                // Skip if moving to same square
                 if (r == oldRow && c == oldCol)
                     continue;
 
-                // First: movement pattern legal?
-                if (!Move::isValidMove(piece, r, c, oldRow, oldCol, board))
-                    continue;
+                if (Move::isValidMove(piece, r, c, oldRow, oldCol, board))
+                {
+                    std::cout
+                        << "[LEGAL MOVE FOUND] "
+                        << piece->type
+                        << " "
+                        << Move::squareName(oldRow, oldCol)
+                        << " -> "
+                        << Move::squareName(r, c)
+                        << '\n';
 
-                // Second: simulate move ? does it leave king in check?
-                if (Move::leavesKingInCheck(piece, r, c, oldRow, oldCol, board))
-                    continue;
-
-                // Found at least one legal move
-                return true;
+                    return true;
+                }
             }
         }
-    }
 
-    return false; // No legal moves exist
-};
+    }
+    return false;
+}
 
 bool Board::isStalemate(bool isWhite)
 {
@@ -1343,6 +1585,285 @@ bool Board::isStalemate(bool isWhite)
         return false;
 
     return true; // Not in check & no moves = stalemate
+}
+
+std::string Board::getPositionKey() const
+{
+    std::string key;
+
+    // ==============================================
+    // PIECE PLACEMENT
+    // ==============================================
+
+    for (int row = 0; row < BOARD_SIZE; row++)
+    {
+        for (int col = 0; col < BOARD_SIZE; col++)
+        {
+            Piece* piece = board[row][col];
+
+            if (piece)
+                key += piece->type;
+            else
+                key += "--";
+
+            key += '/';
+        }
+    }
+
+    // ==============================================
+    // SIDE TO MOVE
+    // ==============================================
+
+    key += isWhiteTurn ? "W/" : "B/";
+
+    // ==============================================
+    // CASTLING RIGHTS
+    // ==============================================
+
+    bool whiteKingSide = false;
+    bool whiteQueenSide = false;
+    bool blackKingSide = false;
+    bool blackQueenSide = false;
+
+    Piece* wk = board[7][4];
+    Piece* bk = board[0][4];
+
+    if (wk &&
+        wk->type == "wk" &&
+        !wk->hasMoved)
+    {
+        Piece* rook = board[7][7];
+
+        if (rook &&
+            rook->type == "wr" &&
+            !rook->hasMoved)
+        {
+            whiteKingSide = true;
+        }
+
+        rook = board[7][0];
+
+        if (rook &&
+            rook->type == "wr" &&
+            !rook->hasMoved)
+        {
+            whiteQueenSide = true;
+        }
+    }
+
+    if (bk &&
+        bk->type == "bk" &&
+        !bk->hasMoved)
+    {
+        Piece* rook = board[0][7];
+
+        if (rook &&
+            rook->type == "br" &&
+            !rook->hasMoved)
+        {
+            blackKingSide = true;
+        }
+
+        rook = board[0][0];
+
+        if (rook &&
+            rook->type == "br" &&
+            !rook->hasMoved)
+        {
+            blackQueenSide = true;
+        }
+    }
+
+    key += whiteKingSide ? "K" : "-";
+    key += whiteQueenSide ? "Q" : "-";
+    key += blackKingSide ? "k" : "-";
+    key += blackQueenSide ? "q" : "-";
+
+    key += '/';
+
+    // ==============================================
+    // EN PASSANT
+    // ==============================================
+
+    bool epAvailable = false;
+
+    for (Piece* piece : pieces)
+    {
+        if (!piece)
+            continue;
+
+        if ((piece->type == "wp" ||
+            piece->type == "bp") &&
+            piece->enPassantEligible)
+        {
+            int row = piece->yPos / SQUARE_SIZE;
+            int col = piece->xPos / SQUARE_SIZE;
+
+            key += "EP:";
+            key += std::to_string(row);
+            key += ",";
+
+            key += std::to_string(col);
+            key += '/';
+
+            epAvailable = true;
+            break;
+        }
+    }
+
+    if (!epAvailable)
+        key += "EP:-/";
+
+    return key;
+}
+
+void Board::recordPosition()
+{
+    std::string key = getPositionKey();
+    positionOccurrences[key]++;
+
+    std::cout
+        << "[DRAW] Position occurrence: "
+        << positionOccurrences[key]
+        << '\n';
+}
+
+bool Board::isFivefoldRepetition() const
+{
+    std::string key = getPositionKey();
+    auto it = positionOccurrences.find(key);
+
+    if (it == positionOccurrences.end())
+        return false;
+
+    return it->second >= 5;
+}
+
+bool Board::isInsufficientMaterial()
+{
+    int whiteBishops = 0;
+    int blackBishops = 0;
+
+    int whiteKnights = 0;
+    int blackKnights = 0;
+
+    int whiteOther = 0;
+    int blackOther = 0;
+
+    int whiteBishopSquareColor = -1;
+    int blackBishopSquareColor = -1;
+
+    for (Piece* piece : pieces)
+    {
+        if (!piece)
+            continue;
+
+        char type = piece->type[1];
+
+        // Kings don't count as material
+        if (type == 'k')
+            continue;
+
+        bool isWhite = piece->isWhite;
+
+        if (type == 'p' || type == 'r' || type == 'q')
+        {
+            if (isWhite)
+                whiteOther++;
+            else
+                blackOther++;
+        }
+        else if (type == 'n')
+        {
+            if (isWhite)
+                whiteKnights++;
+            else
+                blackKnights++;
+        }
+        else if (type == 'b')
+        {
+            int row = piece->yPos / SQUARE_SIZE;
+            int col = piece->xPos / SQUARE_SIZE;
+
+            int squareColor = (row + col) % 2;
+
+            if (isWhite)
+            {
+                whiteBishops++;
+                whiteBishopSquareColor = squareColor;
+            }
+            else
+            {
+                blackBishops++;
+                blackBishopSquareColor = squareColor;
+            }
+        }
+    }
+
+    // Any pawn, rook or queen means
+    // there is sufficient material.
+    if (whiteOther > 0 || blackOther > 0)
+        return false;
+
+    // King vs King
+    if (whiteBishops == 0 &&
+        blackBishops == 0 &&
+        whiteKnights == 0 &&
+        blackKnights == 0)
+    {
+        return true;
+    }
+
+    // King + Bishop vs King
+    if ((whiteBishops == 1 &&
+        whiteKnights == 0 &&
+        blackBishops == 0 &&
+        blackKnights == 0) ||
+
+        (blackBishops == 1 &&
+            blackKnights == 0 &&
+            whiteBishops == 0 &&
+            whiteKnights == 0))
+    {
+        return true;
+    }
+
+    // King + Knight vs King
+    if ((whiteKnights == 1 &&
+        whiteBishops == 0 &&
+        blackBishops == 0 &&
+        blackKnights == 0) ||
+
+        (blackKnights == 1 &&
+            blackBishops == 0 &&
+            whiteBishops == 0 &&
+            whiteKnights == 0))
+    {
+        return true;
+    }
+
+    // King + Bishop vs King + Bishop
+    // is insufficient only when both bishops
+    // are on the same color squares.
+    if (whiteBishops == 1 &&
+        blackBishops == 1 &&
+        whiteKnights == 0 &&
+        blackKnights == 0)
+    {
+        return whiteBishopSquareColor ==
+            blackBishopSquareColor;
+    }
+
+    return false;
+}
+
+void Board::setConnectionGameOver()
+{
+    gameOver = true;
+    connectionGameOver = true;
+
+    gameOverStart = SDL_GetTicks();
+    std::cout << "[GAME] Opponent disconnected\n";
 }
 
 void Board::drawGameOverScreen(SDL_Renderer* renderer, TTF_Font* font)
@@ -1360,9 +1881,12 @@ void Board::drawGameOverScreen(SDL_Renderer* renderer, TTF_Font* font)
         int row = losingKing->yPos / SQUARE_SIZE;
         int col = losingKing->xPos / SQUARE_SIZE;
 
+        int dispRow = whitePerspective ? row : BOARD_SIZE - 1 - row;
+        int dispCol = whitePerspective ? col : BOARD_SIZE - 1 - col;
+
         SDL_FRect sq = {
-            BORDER_WIDTH_X + col * SQUARE_SIZE,
-            BORDER_WIDTH_Y + row * SQUARE_SIZE,
+            BORDER_WIDTH_X + dispCol * SQUARE_SIZE,
+            BORDER_WIDTH_Y + dispRow * SQUARE_SIZE,
             SQUARE_SIZE,
             SQUARE_SIZE
         };
@@ -1392,13 +1916,29 @@ void Board::drawGameOverScreen(SDL_Renderer* renderer, TTF_Font* font)
 
 void Board::drawEndText(SDL_Renderer* renderer, TTF_Font* font)
 {
-    const char* msg = (stalemate ? "Stalemate!!" : "Checkmate??");
-
+    const char* msg;
     SDL_Color col;
-    if (stalemate)
+
+    if (connectionGameOver)
+    {
+        msg = "Game Ended!!";
         col = { 0, 0, 0, 204 };
+    }
+    else if (draw)
+    {
+        msg = "Draw!!";
+        col = { 0, 0, 0, 204 };
+    }
+    else if (stalemate)
+    {
+        msg = "Stalemate!!";
+        col = { 0, 0, 0, 204 };
+    }
     else
+    {
+        msg = "Checkmate!!";
         col = { 204, 0, 0, 204 };
+    }
 
     int w, h;
     TTF_GetStringSize(font, msg, strlen(msg), &w, &h);
@@ -1474,6 +2014,12 @@ void Board::reset()
     gameOver = false;
     stalemate = false;
 
+    draw = false;
+    halfmoveClock = 0;
+
+    positionOccurrences.clear();
+    connectionGameOver = false;
+
     losingKing = nullptr;
     whiteLost = false;
 
@@ -1485,6 +2031,26 @@ void Board::reset()
 
     // Put all pieces back
     initializePieces();
+
+    // Rebuild board array
+    for (Piece* piece : pieces)
+    {
+        if (!piece)
+            continue;
+
+        int row = piece->yPos / SQUARE_SIZE;
+        int col = piece->xPos / SQUARE_SIZE;
+
+        if (row >= 0 && row < BOARD_SIZE &&
+            col >= 0 && col < BOARD_SIZE)
+        {
+            board[row][col] = piece;
+        }
+    }
+
+    // Record starting position
+    positionOccurrences.clear();
+    recordPosition();
 }
 
 bool Board::hasFinishedPromotionMove() const

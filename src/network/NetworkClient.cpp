@@ -25,8 +25,7 @@ using tcp = net::ip::tcp;
 NetworkClient::NetworkClient()
     : sslContext(ssl::context::tls_client)
 {
-    sslContext.set_default_verify_paths();
-    sslContext.set_verify_mode(ssl::verify_peer);
+    sslContext.set_verify_mode(ssl::verify_none);
 }
 
 NetworkClient::~NetworkClient()
@@ -44,8 +43,21 @@ bool NetworkClient::connect(
     if (receiveThread.joinable())
         disconnect();
 
+    std::cout
+        << "[Network] Connecting to "
+        << address
+        << ":"
+        << port
+        << '\n';
+
     try
     {
+        // -----------------------------------------
+        // DNS RESOLUTION
+        // -----------------------------------------
+
+        std::cout << "[Network] Resolving...\n";
+
         tcp::resolver resolver(ioContext);
 
         auto results =
@@ -54,18 +66,44 @@ bool NetworkClient::connect(
                 std::to_string(port)
             );
 
+        std::cout
+            << "[Network] DNS resolved\n";
+
+
+        // -----------------------------------------
+        // CREATE WEBSOCKET
+        // -----------------------------------------
+
         ws = std::make_unique<WebSocketStream>(
             ioContext,
             sslContext
         );
 
-        // TCP connection
-        beast::get_lowest_layer(*ws).connect(results);
 
+        // -----------------------------------------
+        // TCP CONNECTION
+        // -----------------------------------------
+
+        std::cout
+            << "[Network] Connecting TCP...\n";
+
+        beast::get_lowest_layer(*ws)
+            .connect(results);
+
+        std::cout
+            << "[Network] TCP connected\n";
+
+
+        // -----------------------------------------
         // SNI
+        // -----------------------------------------
+
+        std::cout
+            << "[Network] Setting SNI...\n";
+
         if (!SSL_set_tlsext_host_name(
-                ws->next_layer().native_handle(),
-                address.c_str()))
+            ws->next_layer().native_handle(),
+            address.c_str()))
         {
             throw beast::system_error(
                 beast::error_code(
@@ -77,26 +115,62 @@ bool NetworkClient::connect(
             );
         }
 
-        // Verify certificate hostname
-        ws->next_layer().set_verify_callback(
-            ssl::host_name_verification(address)
-        );
+        std::cout
+            << "[Network] SNI configured\n";
 
-        // TLS handshake
+
+        // -----------------------------------------
+        // CERTIFICATE VERIFICATION
+        // -----------------------------------------
+
+        //ws->next_layer().set_verify_callback(
+        //    ssl::host_name_verification(address)
+        //);
+
+
+        // -----------------------------------------`
+        // TLS HANDSHAKE
+        // -----------------------------------------
+
+        std::cout
+            << "[Network] TLS handshake...\n";
+
         ws->next_layer().handshake(
             ssl::stream_base::client
         );
 
-        // WebSocket handshake
+        std::cout
+            << "[Network] TLS handshake successful\n";
+
+
+        // -----------------------------------------
+        // WEBSOCKET HANDSHAKE
+        // -----------------------------------------
+
+        std::cout
+            << "[Network] WebSocket handshake...\n";
+
         ws->handshake(
             address,
             "/"
         );
 
+        std::cout
+            << "[Network] WebSocket handshake successful\n";
+
+
+        // -----------------------------------------
+        // CONNECTED
+        // -----------------------------------------
+
         connected = true;
         running = true;
         disconnected = false;
         ready = false;
+        myTurn = false;
+
+        roomFull = false;
+        roomJoined = false;
 
         startListening();
 
@@ -105,16 +179,16 @@ bool NetworkClient::connect(
             << address
             << ":"
             << port
-            << std::endl;
+            << '\n';
 
         return true;
     }
     catch (const std::exception& e)
     {
         std::cout
-            << "[Network] Connection failed: "
+            << "\n========== NETWORK ERROR ==========\n"
             << e.what()
-            << std::endl;
+            << "\n===================================\n";
 
         connected = false;
         running = false;
@@ -125,6 +199,7 @@ bool NetworkClient::connect(
         {
             beast::error_code ec;
 
+            // Close underlying TCP connection.
             beast::get_lowest_layer(*ws)
                 .socket()
                 .close(ec);
@@ -255,6 +330,7 @@ void NetworkClient::startListening()
                 case MessageType::RoomJoined:
                 {
                     roomCode = packet.payload;
+                    roomJoined = true;
 
                     std::cout
                         << "[Network] Joined room: "
@@ -266,8 +342,11 @@ void NetworkClient::startListening()
 
                 case MessageType::RoomFull:
                 {
-                    std::cout
-                        << "[Network] Room is full\n";
+                    std::cout << "[Network] Room is full\n";
+
+                    roomFull = true;
+                    myTurn = false;
+                    myColor = PlayerColor::None;
 
                     break;
                 }
@@ -320,8 +399,21 @@ void NetworkClient::startListening()
                         incomingMoves.push(move);
                     }
 
-                    myTurn = true;
+                    //myTurn = true;
                     std::cout << "[Network] Move queued\n";
+
+                    break;
+                }
+
+                case MessageType::Disconnect:
+                {
+                    std::cout << "[Network] Opponent disconnected\n";
+
+                    running = false;
+                    connected = false;
+                    disconnected = true;
+                    ready = false;
+                    myTurn = false;
 
                     break;
                 }
@@ -360,30 +452,36 @@ void NetworkClient::startListening()
 
 void NetworkClient::disconnect()
 {
-    if (!running && !connected)
-        return;
+    std::cout << "[Network] Disconnecting...\n";
 
-    // Tell receive thread this is intentional.
+    // Stop receive thread
     running = false;
 
+    // Wake up ws->read()
     if (ws)
     {
-        beast::error_code ec;
-
-        // Cancel the underlying TCP operation so
-        // ws->read() wakes up.
         beast::get_lowest_layer(*ws).cancel();
     }
 
+    // IMPORTANT:
+    // Always join the receive thread if it is joinable.
     if (receiveThread.joinable())
-        receiveThread.join();
+    {
+        if (receiveThread.get_id() != std::this_thread::get_id())
+        {
+            receiveThread.join();
+        }
+    }
 
+    // Now it is safe to close the socket.
     if (ws)
     {
         beast::error_code ec;
 
+        // SSL shutdown
         ws->next_layer().shutdown(ec);
 
+        // Close underlying TCP socket
         beast::get_lowest_layer(*ws)
             .socket()
             .close(ec);
@@ -394,9 +492,17 @@ void NetworkClient::disconnect()
     connected = false;
     ready = false;
     myTurn = false;
+
+    roomFull = false;
+    roomJoined = false;
+
+    myColor = PlayerColor::None;
+
     roomCode.clear();
 
     disconnected = false;
+
+    std::cout << "[Network] Disconnected\n";
 }
 
 bool NetworkClient::isConnected() const
@@ -459,7 +565,12 @@ bool NetworkClient::hasPendingMessages()
     std::lock_guard<std::mutex>
         lock(queueMutex);
 
-    return !incomingMoves.empty();
+    bool pending = !incomingMoves.empty();
+
+    if (pending)
+        std::cout << "[Network] hasPendingMessages() = TRUE\n";
+
+    return pending;
 }
 
 MoveMessage NetworkClient::getNextMove()
@@ -486,6 +597,11 @@ bool NetworkClient::isMyTurn() const
     return myTurn;
 }
 
+void NetworkClient::setMyTurn(bool turn)
+{
+    myTurn = turn;
+}
+
 bool NetworkClient::isReady() const
 {
     return ready;
@@ -504,4 +620,22 @@ void NetworkClient::clearDisconnectFlag()
 std::string NetworkClient::getRoomCode() const
 {
     return roomCode;
+}
+
+bool NetworkClient::consumeRoomFull()
+{
+    if (!roomFull)
+        return false;
+
+    roomFull = false;
+    return true;
+}
+
+bool NetworkClient::consumeRoomJoined()
+{
+    if (!roomJoined)
+        return false;
+
+    roomJoined = false;
+    return true;
 }

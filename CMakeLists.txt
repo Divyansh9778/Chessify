@@ -4,6 +4,10 @@ project(Chessify)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+if (MSVC)
+    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+endif()
+
 find_package(SDL3 REQUIRED)
 find_package(SDL3_image REQUIRED)
 find_package(SDL3_ttf REQUIRED)
@@ -37,11 +41,11 @@ else()
     list(APPEND SRC_FILES src/Engine_unix.cpp)
 endif()
 
-add_executable(Chessify ${SRC_FILES} "src/network/PlayerColor.h" "src/network/NetworkProtocol.h" "src/network/NetworkPacket.h" "src/network/ProtocolUtils.h" "src/network/ProtocolUtils.cpp")
+add_executable(Chessify ${SRC_FILES} "src/network/PlayerColor.h" "src/network/NetworkProtocol.h" "src/network/NetworkPacket.h" "src/network/ProtocolUtils.h" "src/network/ProtocolUtils.cpp" "server/RoomManager.h" "server/RoomManager.cpp" "server/Room.h")
 
 add_executable(ChessifyServer
     server/server.cpp
- "src/network/PlayerColor.h" "src/network/NetworkProtocol.h" "src/network/NetworkPacket.h" "src/network/ProtocolUtils.h" "src/network/ProtocolUtils.cpp")
+ "src/network/PlayerColor.h" "src/network/NetworkProtocol.h" "src/network/NetworkPacket.h" "src/network/ProtocolUtils.h" "src/network/ProtocolUtils.cpp" "server/RoomManager.h" "server/RoomManager.cpp" "server/Room.h")
 
 target_include_directories(Chessify PRIVATE
     src
