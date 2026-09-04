@@ -14,7 +14,7 @@ The chess engine and game-state management are implemented from scratch without 
 
 ![Start Menu](screenshots/start_menu.png)
 
-### Stockfish — Difficulty & Player Color
+### Stockfish - Difficulty & Player Color
 
 ![Choose Rating](screenshots/choose_rating.png)
 
@@ -50,7 +50,7 @@ The chess engine and game-state management are implemented from scratch without 
 
 ![Draw](screenshots/draw.png)
 
-### Multiplayer — Game Ended
+### Multiplayer - Game Ended
 
 ![Game Ended](screenshots/game_ended.png)
 
