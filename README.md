@@ -1,22 +1,30 @@
 # ♟️ Chessify
 
-### C++ Chess Application with SDL3 GUI and Stockfish AI
+### Modern C++ Chess Application with SDL3, Stockfish AI & Real-Time Multiplayer
 
-Chessify is a desktop chess application written in **modern C++ using object-oriented design** featuring a custom chess rule engine, an SDL3-based graphical interface, and AI gameplay powered by **Stockfish** via the **UCI protocol**.
+Chessify is a desktop chess application built in **C++17** with a custom chess rules engine, an **SDL3** graphical interface, **Stockfish** integration through the **UCI protocol**, and a real-time multiplayer system built with **Boost.Asio/Boost.Beast WebSockets**.
 
-The project implements chess logic, move validation, UI states, and engine communication **from scratch without using external chess libraries**.
+The chess engine and game-state management are implemented from scratch without using an external chess library.
 
 ---
 
-# Screenshots
+## Screenshots
 
 ### Start Menu
 
 ![Start Menu](screenshots/start_menu.png)
 
-### Choose Rating
+### Stockfish — Difficulty & Player Color
 
 ![Choose Rating](screenshots/choose_rating.png)
+
+### Create Room
+
+![Create Room](screenshots/create_room.png)
+
+### Join Room
+
+![Join Room](screenshots/join_room.png)
 
 ### Gameplay
 
@@ -24,11 +32,11 @@ The project implements chess logic, move validation, UI states, and engine commu
 
 ### Legal Move Highlighting
 
-![Moves](screenshots/legal_moves.png)
+![Legal Moves](screenshots/legal_moves.png)
 
 ### Pawn Promotion
 
-![Promotion](screenshots/pawn_promotion.png)
+![Pawn Promotion](screenshots/pawn_promotion.png)
 
 ### Checkmate
 
@@ -38,154 +46,314 @@ The project implements chess logic, move validation, UI states, and engine commu
 
 ![Stalemate](screenshots/stalemate.png)
 
+### Draw
+
+![Draw](screenshots/draw.png)
+
+### Multiplayer — Game Ended
+
+![Game Ended](screenshots/game_ended.png)
+
 ### Exit Confirmation
 
-![Exit](screenshots/exit_confirmation.png)
+![Exit Confirmation](screenshots/exit_confirmation.png)
 
 ---
 
 # Features
 
-### Gameplay
+## ♟️ Chess Engine
 
-- Complete chess rules implementation
-- Player vs Player mode
-- Player vs Stockfish (Chess Engine) mode
-- Adjustable AI difficulty (Choose Engine Rating)
-- Check, checkmate, and stalemate detection
-
-### Move System
-
+- Complete chess rule implementation
 - Legal move generation for all pieces
-- Highlighting of King in Check
-- Last move highlighting
+- Check, checkmate, and stalemate detection
 - Illegal move prevention
-- Move history tracking
-- Undo / redo state functionality
+- King-safety validation
+- Board-state simulation for move validation
+- Move history and state reconstruction
 
-### Special Rules
+## Special Moves
 
-- Castling (king-side and queen-side)
+- King-side and queen-side castling
 - En-passant capture
-- Pawn promotion with piece selection (Q, R, B, N)
+- Pawn promotion to Queen, Rook, Bishop, or Knight
 
-### UI
+## Draw Detection
 
-- SDL3 graphical interface
-- Start menu with mode selection
-- Engine ELO selection
-- Exit confirmation dialog
-- Implementation of Moves list
-- Overlay dialogs
+- Insufficient material
+- 75-move rule
+- Fivefold repetition
+- Stalemate
 
-### Captured Pieces
-
-- Captured pieces and difference tracking
-- Stacked captured piece display
-- Separate tracking for both sides
+Draw positions preserve the complete board state so both kings and all remaining pieces remain visible.
 
 ---
 
-# Stockfish Integration
+# 🎮 Game Modes
 
-Stockfish is integrated using the **UCI (Universal Chess Interface)** protocol.
+### Player vs Player
+
+Local two-player chess using the same desktop application.
+
+### Player vs Stockfish
+
+- Configurable engine strength
+- White, Black, or Random player color
+- Automatic board perspective based on player color
+- Engine-first gameplay when the player chooses Black
+- Stockfish communication through UCI
+
+### Real-Time Multiplayer
+
+- Room-code matchmaking
+- Create Room / Join Room
+- Two-player room management
+- Randomized White/Black assignment
+- Server-side turn synchronization
+- Remote move forwarding
+- Room isolation
+- Player disconnect handling
+- `Game Ended!!` overlay when an opponent disconnects
+
+---
+
+# 🌐 Multiplayer Architecture
+
+```text
++-------------------+       WebSocket       +----------------------+
+|  Chessify Client  | <-------------------> |   Chessify Server    |
+|                   |                       |                      |
+|  SDL3 UI          |                       |  RoomManager         |
+|  Board            |                       |  GameRoom            |
+|  GameController   |                       |  Player Sessions     |
+|  NetworkClient    |                       |  Message Routing     |
++-------------------+                       +----------------------+
+```
+
+The server manages independent game rooms and forwards messages between the two players in each room.
+
+The client maintains the local chess state and renders the synchronized game through the SDL3 interface.
+
+---
+
+# 📡 Networking
+
+Networking uses:
+
+- **Boost.Asio** for networking primitives
+- **Boost.Beast** for WebSocket communication
+- Multithreaded message handling
+- Thread-safe room state
+- Thread-safe message forwarding
+
+Application-level messages include:
+
+```text
+CREATE_ROOM
+JOIN_ROOM
+START
+MOVE
+DISCONNECT
+ROOM_FULL
+```
+
+These messages coordinate room creation, joining, player assignment, game initialization, move synchronization, and connection lifecycle events.
+
+---
+
+# 🤖 Stockfish Integration
+
+Stockfish is integrated through the **Universal Chess Interface (UCI)**.
 
 Workflow:
 
-1. Launch Stockfish process
-2. Send current board position
-3. Request best move (`setoption name UCI_Elo value [ELO_RATING]`)
-4. Parse engine response
-5. Execute move live on board
+1. Launch the Stockfish process
+2. Initialize UCI
+3. Configure engine strength
+4. Send the current board position
+5. Request the best move
+6. Parse the returned UCI move
+7. Apply the move to the board
 
-Example UCI commands:
+Example:
 
-```
+```text
 uci
 isready
-position startpos moves e2e4 e7e5
 setoption name UCI_LimitStrength value true
 setoption name UCI_Elo value 1500
-bestmove g8f6(q)
+position startpos moves e2e4 e7e5
+go depth 18
 ```
 
-The engine currently plays **Black**, while the player controls **White**.
+Stockfish can play either White or Black depending on the selected player color.
 
 ---
 
-# Game States
+# 🧩 Move System
 
-The application uses a simple state machine:
+Chessify maintains structured move history supporting:
 
-```
+- Move records
+- Algebraic move display
+- Captured-piece tracking
+- Last-move highlighting
+- Undo / redo
+- Historical board reconstruction
+- Replay navigation
+
+---
+
+# ♜ Captured Pieces & Material
+
+Captured pieces are tracked independently for White and Black.
+
+The UI supports:
+
+- Captured-piece display
+- Stacked captured pieces
+- Material difference calculation
+- Perspective-aware captured-piece positioning
+
+Captured-piece rows and the material indicator flip consistently with the active board perspective.
+
+---
+
+# 🖥️ User Interface
+
+Implemented with **SDL3** and **SDL3_ttf**.
+
+Includes:
+
+- Start menu
+- Stockfish configuration
+- Create Room
+- Join Room
+- Waiting Room
+- Gameplay screen
+- Move history panel
+- Promotion menu
+- Exit confirmation
+- Checkmate overlay
+- Stalemate overlay
+- Draw overlay
+- Multiplayer game-ended overlay
+
+Keyboard navigation supports common actions such as confirming and going back.
+
+---
+
+# 🔄 Board Perspective
+
+The board dynamically changes orientation based on the player's color.
+
+- **White perspective:** `a` → `h`, ranks `8` → `1`
+- **Black perspective:** `h` → `a`, ranks `1` → `8`
+
+The board coordinates, pieces, captured-piece rows, and material indicator remain consistent with the active perspective.
+
+---
+
+# 🏁 Game States
+
+The application uses UI/game-state handling for:
+
+```text
 START_MENU
+CREATE_ROOM
+JOIN_ROOM
+WAITING_ROOM
 PLAYING
 EXIT_CONFIRM
 ```
 
-ESC opens the exit confirmation dialog from any state.
+Gameplay terminal states include:
 
----
-
-# Project Structure
-
-```
-src/
-
-Board/
-    Game state
-    Move validation
-    Chess rule enforcement
-
-Piece/
-    Piece behavior
-    Rendering logic
-
-Move/
-    Move representation
-
-MoveRecord/
-    Move history and undo/redo
-
-Engine/
-    Stockfish communication (UCI)
-
-Settings/
-    Game configuration
-
-main.cpp
-    SDL initialization
-    Event loop
-    UI state handling
+```text
+CHECKMATE
+STALEMATE
+DRAW
+CONNECTION_GAME_OVER
 ```
 
----
-
-# Technologies Used
-
-| Technology   | Purpose              |
-| ------------ | -------------------- |
-| C++          | Core application     |
-| SDL3         | Graphics rendering   |
-| SDL3_ttf     | Font rendering       |
-| Stockfish    | Chess Engine         |
-| UCI Protocol | Engine communication |
-| CMake        | Configuration System |
+The board remains visible while the appropriate end-game overlay is displayed.
 
 ---
 
-# Author
+# 📁 Project Structure
+
+```text
+Chessify/
+│
+├── src/
+│   ├── Board/          # Game state and chess rules
+│   ├── Piece/          # Piece representation and behavior
+│   ├── Move/           # Move representation
+│   ├── MoveRecord/     # Move history and replay
+│   ├── Engine/         # Stockfish / UCI integration
+│   ├── Network/        # WebSocket client
+│   ├── Server/         # RoomManager / GameRoom
+│   ├── Settings/       # Game configuration
+│   └── main.cpp        # SDL, UI states and main loop
+│
+├── assets/
+├── screenshots/
+├── CMakeLists.txt
+└── README.md
+```
+
+---
+
+# 🛠️ Technologies Used
+
+| Technology      | Purpose                         |
+| --------------- | ------------------------------- |
+| **C++17**       | Core application and game logic |
+| **SDL3**        | Graphics, windowing and input   |
+| **SDL3_ttf**    | Font rendering                  |
+| **Boost.Asio**  | Networking                      |
+| **Boost.Beast** | WebSocket communication         |
+| **Stockfish**   | Chess engine                    |
+| **UCI**         | Engine communication            |
+| **CMake**       | Build configuration             |
+| **WebSockets**  | Real-time multiplayer           |
+
+---
+
+# 🏗️ Build
+
+Chessify uses **CMake**.
+
+```bash
+mkdir build
+cd build
+cmake ..
+cmake --build .
+```
+
+The client requires the application's runtime assets and Stockfish executable at the expected paths.
+
+For multiplayer, the desktop client connects to the deployed Chessify WebSocket backend.
+
+---
+
+# ✨ Project Highlights
+
+- Custom chess rules engine implemented from scratch
+- Complete special-move handling
+- Automatic draw detection
+- Move-history reconstruction with undo/redo
+- Stockfish integration through UCI
+- SDL3 real-time graphical rendering
+- Multithreaded WebSocket networking
+- Thread-safe multiplayer room management
+- Real-time move synchronization
+- Player lifecycle and disconnect handling
+- Perspective-aware board and captured-piece rendering
+- Modular separation of game logic, UI, networking, and engine communication
+
+---
+
+# 👤 Author
 
 **Divyansh Sharma**
-
----
-
-# Project Highlights
-
-This project demonstrates:
-
-- Full chess rule implementation
-- Object-oriented C++ design
-- GUI programming with SDL3
-- External engine integration using UCI
-- Deterministic game state management
